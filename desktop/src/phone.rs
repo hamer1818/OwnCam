@@ -35,6 +35,11 @@ pub struct Status {
     /// true ise kenarlarda siyah bant var.
     pub narrow: bool,
     pub exposure_locked: bool,
+    pub focus_locked: bool,
+    pub adaptive_bitrate: bool,
+    /// Uyarlanabilir bit hizi devredeyken **su an** uygulanan deger.
+    /// `bitrate` hedefi, bu ise gercegi gosteriyor.
+    pub bitrate_now: u32,
     pub camera_frames: u64,
     pub gl_draws: u64,
     pub encoder_outputs: u64,

@@ -153,6 +153,8 @@ pub struct Settings {
     pub auto_rotate: bool,
     pub front: bool,
     pub exposure_lock: bool,
+    pub focus_lock: bool,
+    pub adaptive_bitrate: bool,
     pub phone_preview: bool,
     /// Goruntuyu yatayda ters cevir. Telefon tarafinda, GL matrisinde.
     pub mirror: bool,
@@ -168,6 +170,8 @@ impl Default for Settings {
             auto_rotate: true,
             front: true,
             exposure_lock: false,
+            focus_lock: false,
+            adaptive_bitrate: true,
             phone_preview: true,
             mirror: false,
         }
@@ -185,6 +189,8 @@ impl Settings {
             ("auto", bit(self.auto_rotate)),
             ("front", bit(self.front)),
             ("exposure", bit(self.exposure_lock)),
+            ("focus", bit(self.focus_lock)),
+            ("adaptive", bit(self.adaptive_bitrate)),
             ("preview", bit(self.phone_preview)),
             ("mirror", bit(self.mirror)),
         ];
@@ -306,6 +312,8 @@ impl OwnCamApp {
         self.settings.auto_rotate = status.auto_rotate;
         self.settings.front = status.camera.as_deref() == Some("front");
         self.settings.exposure_lock = status.exposure_locked;
+        self.settings.focus_lock = status.focus_locked;
+        self.settings.adaptive_bitrate = status.adaptive_bitrate;
         self.settings.phone_preview = status.preview;
         self.settings.mirror = status.mirror;
         self.applying = false;
@@ -614,6 +622,11 @@ impl OwnCamApp {
         ui.checkbox(&mut self.settings.auto_rotate, "Otomatik donus (telefonu takip et)");
         ui.checkbox(&mut self.settings.front, "On kamera");
         ui.checkbox(&mut self.settings.exposure_lock, "Pozlamayi kilitle");
+        ui.checkbox(&mut self.settings.focus_lock, "Odagi kilitle");
+        ui.checkbox(
+            &mut self.settings.adaptive_bitrate,
+            "Ag yavaslarsa kaliteyi dusur (kare atma)",
+        );
         ui.checkbox(&mut self.settings.phone_preview, "Telefonda onizleme");
         ui.checkbox(&mut self.settings.mirror, "Aynala (yatayda ters cevir)")
             .on_hover_text(
@@ -665,6 +678,21 @@ impl OwnCamApp {
                 status.frames_sent, status.frames_dropped
             ));
             ui.monospace(format!("kodlayici  {}", status.encoder_outputs));
+            // Uyarlanabilir bit hizi devredeyken hedefle gercek ayrisiyor;
+            // kismanin ne zaman devreye girdigi ancak boyle gorunuyor.
+            let now_mbit = status.bitrate_now as f32 / 1e6;
+            let target_mbit = status.bitrate as f32 / 1e6;
+            let kisik = status.bitrate_now > 0 && status.bitrate_now + 1000 < status.bitrate;
+            let satir = if status.adaptive_bitrate {
+                format!("bit hizi   {now_mbit:.1} / {target_mbit:.1} Mbit (oto)")
+            } else {
+                format!("bit hizi   {target_mbit:.1} Mbit")
+            };
+            if kisik {
+                ui.colored_label(egui::Color32::from_rgb(200, 160, 60), satir);
+            } else {
+                ui.monospace(satir);
+            }
             ui.monospace(format!(
                 "bagli PC   {}",
                 status.client.as_deref().unwrap_or("-")

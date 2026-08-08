@@ -107,6 +107,22 @@ data class StreamConfig(
      * Varsayilan **kapali**: yayina giden kare gercege sadik kalsin.
      */
     val mirror: Boolean = false,
+    /**
+     * Odagi sabitle.
+     *
+     * Surekli odak (CONTINUOUS_VIDEO) webcam icin huzursuz: kadrajda bir sey
+     * kimildadiginda lens arayip goruntuyu bulaniklastiriyor. Sabit bir
+     * stantta oturan kamerada odak zaten bir kez bulununca degismemeli.
+     */
+    val lockFocus: Boolean = false,
+    /**
+     * Ag yetismedigi zaman kare atmak yerine kaliteyi dusur.
+     *
+     * Varsayilan **acik**: yalnizca kare dusmeye baslayinca devreye giriyor,
+     * saglikli agda hic calismiyor. Kare atmak gorunur sekilde daha rahatsiz
+     * edici (donma), bit hizini kismak ise yalnizca detay kaybi.
+     */
+    val adaptiveBitrate: Boolean = true,
     val port: Int = DEFAULT_PORT
 ) : Serializable {
 
@@ -135,7 +151,9 @@ data class StreamConfig(
                 preview = p.getBoolean("preview", d.preview),
                 autoRotate = p.getBoolean("autoRotate", d.autoRotate),
                 frameMode = FrameMode.from(p.getString("frameMode", d.frameMode.key)),
-                mirror = p.getBoolean("mirror", d.mirror)
+                mirror = p.getBoolean("mirror", d.mirror),
+                lockFocus = p.getBoolean("lockFocus", d.lockFocus),
+                adaptiveBitrate = p.getBoolean("adaptiveBitrate", d.adaptiveBitrate)
             )
         }
 
@@ -152,6 +170,8 @@ data class StreamConfig(
                 .putBoolean("preview", config.preview)
                 .putBoolean("autoRotate", config.autoRotate)
                 .putBoolean("mirror", config.mirror)
+                .putBoolean("lockFocus", config.lockFocus)
+                .putBoolean("adaptiveBitrate", config.adaptiveBitrate)
                 .putString("frameMode", config.frameMode.key)
                 .apply()
         }

@@ -12,7 +12,9 @@ import android.content.IntentFilter
 import android.hardware.camera2.CameraCharacteristics
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
@@ -121,6 +123,7 @@ class StreamService : Service(), CameraEncoder.Listener {
         cam.start()
         registerControlReceiver()
         startOrientationTracking()
+        startBitrateControl()
 
         advertiser = MdnsAdvertiser(this).also { it.register(config.port) }
 
@@ -141,6 +144,7 @@ class StreamService : Service(), CameraEncoder.Listener {
 
     private fun stopStreaming() {
         stopOrientationTracking()
+        stopBitrateControl()
         statsProvider = null
         runCatching { unregisterReceiver(controlReceiver) }
         advertiser?.unregister()
@@ -223,7 +227,10 @@ class StreamService : Service(), CameraEncoder.Listener {
                     autoRotate = params["auto"]?.let { it == "1" } ?: config.autoRotate,
                     frameMode = params["mode"]?.let { FrameMode.from(it) } ?: config.frameMode,
                     mirror = params["mirror"]?.let { it == "1" } ?: config.mirror,
-                    lockExposure = params["exposure"]?.let { it == "1" } ?: config.lockExposure
+                    lockExposure = params["exposure"]?.let { it == "1" } ?: config.lockExposure,
+                    lockFocus = params["focus"]?.let { it == "1" } ?: config.lockFocus,
+                    adaptiveBitrate = params["adaptive"]?.let { it == "1" }
+                        ?: config.adaptiveBitrate
                 ).let {
                     if (params["width"] != null || params["height"] != null) {
                         it.copy(bitRate = StreamConfig.defaultBitRate(it.width, it.height))
@@ -272,6 +279,70 @@ class StreamService : Service(), CameraEncoder.Listener {
         if (wasRunning) stopStreaming()
         config = updated
         if (wasRunning) startStreaming()
+    }
+
+    // -------------------------------------------------- uyarlanabilir bit hizi
+
+    private val bitrateHandler = Handler(Looper.getMainLooper())
+    private var lastDropped = 0L
+    private var calmTicks = 0
+    private var bitrateTick: Runnable? = null
+
+    /**
+     * Ag yetismedigi zaman kare atmak yerine kaliteyi dusur.
+     *
+     * Sinyal olarak gonderim kuyrugundan **dusen kare** sayaci kullaniliyor.
+     * Kuyruk iki kare tutuyor ve dolunca en eskisini atiyor; yani sayac
+     * artiyorsa kodlayici agin tasiyabildiginden fazlasini uretiyor demektir.
+     * Baska bir olcume (RTT, pencere boyu) gerek yok - tikanmanin tanimi bu.
+     *
+     * Inis hizli, cikis yavas: tikanmaya hemen tepki verilmeli ama toparlanma
+     * denemesi yeni bir tikanma yaratmamali. Yukari cikis ancak birkac sakin
+     * turdan sonra ve kucuk adimlarla.
+     */
+    private fun startBitrateControl() {
+        if (!config.adaptiveBitrate) return
+        lastDropped = server?.framesDropped?.get() ?: 0
+        calmTicks = 0
+        val tick = object : Runnable {
+            override fun run() {
+                stepBitrate()
+                bitrateHandler.postDelayed(this, BITRATE_TICK_MS)
+            }
+        }
+        bitrateTick = tick
+        bitrateHandler.postDelayed(tick, BITRATE_TICK_MS)
+    }
+
+    private fun stopBitrateControl() {
+        bitrateTick?.let { bitrateHandler.removeCallbacks(it) }
+        bitrateTick = null
+    }
+
+    private fun stepBitrate() {
+        val cam = encoder ?: return
+        val dropped = server?.framesDropped?.get() ?: return
+        val newDrops = dropped - lastDropped
+        lastDropped = dropped
+
+        val current = cam.appliedBitrate
+        if (newDrops > 0) {
+            calmTicks = 0
+            val target = (current * BITRATE_DOWN).toInt()
+                .coerceAtLeast(CameraEncoder.MIN_BITRATE)
+            if (target < current) {
+                Log.i(TAG, "ag tikandi ($newDrops kare), bit hizi $current -> $target")
+                cam.setBitrate(target)
+            }
+            return
+        }
+
+        calmTicks++
+        if (calmTicks < BITRATE_CALM_TICKS || current >= config.bitRate) return
+        calmTicks = 0
+        val target = (current * BITRATE_UP).toInt().coerceAtMost(config.bitRate)
+        Log.i(TAG, "ag sakin, bit hizi $current -> $target")
+        cam.setBitrate(target)
     }
 
     // ------------------------------------------------------- otomatik donus
@@ -374,6 +445,10 @@ class StreamService : Service(), CameraEncoder.Listener {
           "appliedRotation": ${cam?.appliedAngle ?: config.imageRotation},
           "narrow": ${cam?.pillarboxed ?: false},
           "exposureLocked": ${config.lockExposure},
+          "focusLocked": ${config.lockFocus},
+          "adaptiveBitrate": ${config.adaptiveBitrate},
+          "bitrate": ${config.bitRate},
+          "bitrateNow": ${encoder?.appliedBitrate ?: config.bitRate},
           "cameraFrames": ${cam?.cameraFrames ?: 0},
           "glDraws": ${cam?.glDraws ?: 0},
           "encoderOutputs": ${cam?.encoderOutputs?.get() ?: 0},
@@ -488,6 +563,15 @@ class StreamService : Service(), CameraEncoder.Listener {
         private const val WAKE_LOCK_TIMEOUT_MS = 12L * 60 * 60 * 1000
         /** Yeni yon uygulanmadan once sabit kalmasi gereken sure. */
         private const val ORIENTATION_SETTLE_MS = 900L
+
+        /** Uyarlanabilir bit hizinin denetim araligi. */
+        private const val BITRATE_TICK_MS = 2_000L
+        /** Tikanmada carpan: hizli in. */
+        private const val BITRATE_DOWN = 0.75
+        /** Sakin donemde carpan: yavas cik. */
+        private const val BITRATE_UP = 1.15
+        /** Yukari cikmadan once kac sakin tur beklenecegi (2 sn'lik turlar). */
+        private const val BITRATE_CALM_TICKS = 5
         const val ACTION_STOP = "com.owncam.STOP"
         const val EXTRA_CONFIG = "config"
 

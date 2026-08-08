@@ -543,6 +543,7 @@ class CameraEncoder(
                     configured.setRepeatingRequest(builder.build(), null, cameraHandler)
                     listener.onStarted(frameSize)
                     if (config.lockExposure) scheduleExposureLock()
+                    if (config.lockFocus) scheduleFocusLock()
                 } catch (e: CameraAccessException) {
                     fail("Tekrarlayan istek basarisiz: ${e.message}")
                 }
@@ -580,6 +581,64 @@ class CameraEncoder(
             Log.i(TAG, "pozlama kilitlendi")
         }, EXPOSURE_SETTLE_MS)
     }
+
+    /**
+     * Odagi bulundugu yerde kilitle.
+     *
+     * CONTINUOUS_VIDEO modunda AF tetigi gondermek, belgelenmis davranisa
+     * gore lensi o anki konumda **kilitliyor** - ayri bir "manuel odak"
+     * moduna gecip lens mesafesini elle vermeye gerek yok (o deger cihazdan
+     * cihaza degisiyor ve bazi cihazlarda hic desteklenmiyor).
+     *
+     * Pozlamada oldugu gibi once odagin oturmasini bekliyoruz; hemen
+     * kilitlemek bulanik bir kareyi sabitler.
+     */
+    private fun scheduleFocusLock() {
+        cameraHandler?.postDelayed({
+            val builder = requestBuilder ?: return@postDelayed
+            val active = session ?: return@postDelayed
+            runCatching {
+                builder.set(
+                    CaptureRequest.CONTROL_AF_TRIGGER,
+                    CameraMetadata.CONTROL_AF_TRIGGER_START
+                )
+                active.capture(builder.build(), null, cameraHandler)
+                // Tekrarlayan istekte tetik bosta kalmali; aksi halde her
+                // karede yeniden tetiklenip kilit hic oturmuyor.
+                builder.set(
+                    CaptureRequest.CONTROL_AF_TRIGGER,
+                    CameraMetadata.CONTROL_AF_TRIGGER_IDLE
+                )
+                active.setRepeatingRequest(builder.build(), null, cameraHandler)
+            }
+            Log.i(TAG, "odak kilitlendi")
+        }, FOCUS_SETTLE_MS)
+    }
+
+    /**
+     * Kodlayicinin hedef bit hizini calisirken degistir.
+     *
+     * `requestKeyFrame` ile ayni sebepten **cagiran is parcaciginda
+     * calismiyor**: `setParameters` kodlayici tikaliyken bloklayabiliyor.
+     */
+    fun setBitrate(bitsPerSecond: Int) {
+        val clamped = bitsPerSecond.coerceAtLeast(MIN_BITRATE)
+        if (clamped == appliedBitrate) return
+        appliedBitrate = clamped
+        cameraHandler?.post {
+            val codec = encoder ?: return@post
+            runCatching {
+                codec.setParameters(Bundle().apply {
+                    putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, clamped)
+                })
+            }
+        }
+    }
+
+    /** Su an uygulanan bit hizi; durum ucunda gosteriliyor. */
+    @Volatile
+    var appliedBitrate: Int = config.bitRate
+        private set
 
     private fun selectCamera(manager: CameraManager): String? {
         val ids = manager.cameraIdList
@@ -671,6 +730,15 @@ class CameraEncoder(
         private const val TAG = "OwnCam/Encoder"
         private const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
         private const val EXPOSURE_SETTLE_MS = 2_000L
+
+        /** Odak kilitlenmeden once AF'in oturmasi icin beklenen sure. */
+        private const val FOCUS_SETTLE_MS = 2_500L
+
+        /**
+         * Uyarlanabilir bit hizinin inebilecegi taban. Altina inmek goruntuyu
+         * kullanilamaz hale getiriyor; o noktada sorun agda degil demektir.
+         */
+        const val MIN_BITRATE = 800_000
         private const val KEY_FRAME_MIN_INTERVAL_NANOS = 1_000_000_000L
 
         /**
