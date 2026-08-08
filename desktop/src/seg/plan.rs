@@ -67,6 +67,10 @@ pub struct Plan {
     pub steps: Vec<Step>,
     pub weights: Vec<f32>,
     pub arena_len: usize,
+    /// Agin kullanmadigi, arenanin sonundaki kucuk calisma alani. Kompozit
+    /// gecisi maske kapsamini buraya yaziyor; boylece yeni bir depolama
+    /// tamponu baglamak gerekmiyor (sinir zaten 8'de).
+    pub scratch_off: u32,
     pub input_off: u32,
     /// Planin hangi girdi olcusu icin kuruldugu; teshis icin duruyor.
     #[allow(dead_code)]
@@ -74,6 +78,9 @@ pub struct Plan {
     pub output_off: u32,
     pub output_shape: Shape,
 }
+
+/// Arenanin sonunda ayrilan calisma alani (f32 cinsinden).
+const SCRATCH: usize = 4;
 
 /// Sekil hesaplarinda kullanilan, GPU'ya gitmeyen sabit vektorler.
 enum Folded {
@@ -352,10 +359,14 @@ pub fn build(graph: &Graph, input: Shape) -> Result<Plan, String> {
         .ok_or_else(|| format!("cikti {} uretilmemis", graph.output))?;
     let output_shape = shapes[&graph.output];
 
+    let scratch_off = arena_len as u32;
+    arena_len += SCRATCH;
+
     Ok(Plan {
         steps,
         weights,
         arena_len,
+        scratch_off,
         input_off,
         input_shape: input,
         output_off,
@@ -435,6 +446,21 @@ mod tests {
         // Dosyadaki 425 668 baytin 64'u sekil hesabinin int64 sabitleri;
         // GPU'ya yalnizca kalan f32 agirliklar gidiyor.
         assert_eq!(p.weights.len(), (425668 - 64) / 4);
+    }
+
+    /// Calisma alani agin cikti bolgesiyle cakismamali.
+    #[test]
+    fn calisma_alani_ciktiyla_cakismaz() {
+        let p = plan();
+        let cikti_son = p.output_off as usize + p.output_shape.len();
+        assert!(
+            p.scratch_off as usize >= cikti_son,
+            "calisma alani {} cikti bolgesine ({}..{}) giriyor",
+            p.scratch_off,
+            p.output_off,
+            cikti_son
+        );
+        assert!(p.scratch_off as usize + SCRATCH <= p.arena_len);
     }
 
     /// Derinlemesine evrisimler grup sayisi kanal sayisina esit olarak gelmeli.

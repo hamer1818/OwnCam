@@ -327,6 +327,11 @@ impl Segmenter {
         self.plan.output_off
     }
 
+    /// Arenanin sonundaki calisma alani; kompozit maske kapsamini buraya yaziyor.
+    pub fn scratch_offset(&self) -> u32 {
+        self.plan.scratch_off
+    }
+
     pub fn mask_shape(&self) -> Shape {
         self.plan.output_shape
     }

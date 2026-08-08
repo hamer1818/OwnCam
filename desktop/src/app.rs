@@ -21,6 +21,13 @@ pub const FRAME_MODES: [(&str, &str); 2] = [
     ("tam-kadraj", "Tam kadraj (kirpma yok)"),
 ];
 
+/// Maske kapsami bunun altindaysa arayuz "kisi bulunamadi" diyor.
+///
+/// Deger olcumden: modelin bas-omuz cercevesinde urettigi maskenin ortalamasi
+/// %50 civari, kisiyi bulamadigi asiri yakin cekimde %0,1. Esik ikisinin cok
+/// altinda ve uzaktaki kucuk bir kisiyi eleyecek kadar da dusuk.
+pub const COVERAGE_WARN: f32 = 0.02;
+
 pub const EFFECT_MODES: [&str; 4] = [
     "Kapali",
     "Arka plani bulaniklastir",
@@ -479,14 +486,19 @@ impl OwnCamApp {
             ui.add(
                 egui::Slider::new(&mut self.effect.sharpness, 0.0..=1.0).text("kenar sertligi"),
             );
-            let (err, gpu) = {
+            let (err, gpu, coverage) = {
                 let shared = self.effects.lock().unwrap();
-                (shared.error.clone(), shared.gpu.clone())
+                (shared.error.clone(), shared.gpu.clone(), shared.coverage)
             };
             if let Some(err) = err {
                 ui.colored_label(egui::Color32::from_rgb(200, 120, 60), err);
-            } else if let Some(gpu) = gpu {
-                ui.small(format!("ekran karti: {gpu}"));
+            } else {
+                if let Some(uyari) = kapsam_uyarisi(coverage) {
+                    ui.colored_label(egui::Color32::from_rgb(200, 160, 60), uyari);
+                }
+                if let Some(gpu) = gpu {
+                    ui.small(format!("ekran karti: {gpu}"));
+                }
             }
         }
 
@@ -652,6 +664,18 @@ impl OwnCamApp {
     }
 }
 
+/// Maske kapsami dusukse kullaniciya sebebini soyle.
+///
+/// Model "selfie" cercevesi icin egitilmis: yuzun kareyi doldurdugu asiri
+/// yakin cekimde kisiyi ayirt edemiyor. Uyarmazsak kullanici efektin bozuk
+/// oldugunu sanir.
+fn kapsam_uyarisi(coverage: Option<f32>) -> Option<String> {
+    let c = coverage?;
+    (c < COVERAGE_WARN).then(|| {
+        "kisi bulunamadi - kameraya bas ve omuzlar girecek sekilde uzaklas".to_string()
+    })
+}
+
 fn combo(
     ui: &mut egui::Ui,
     id: &str,
@@ -688,6 +712,20 @@ mod tests {
         let rotation = params.iter().find(|(k, _)| *k == "rotation").unwrap();
         assert_eq!(rotation.1, "270");
         assert!(params.iter().any(|(k, v)| *k == "auto" && v == "0"));
+    }
+
+    /// Kapsam uyarisi yalnizca gercekten dusukken cikmali.
+    #[test]
+    fn kapsam_uyarisi_esikte_calisir() {
+        // Efekt kapali: ag kosmuyor, uyarilacak bir sey yok.
+        assert!(kapsam_uyarisi(None).is_none());
+        // Asiri yakin cekimde olculen deger ~0,001.
+        assert!(kapsam_uyarisi(Some(0.001)).is_some());
+        // Bas-omuz cercevesinde olculen deger ~0,55.
+        assert!(kapsam_uyarisi(Some(0.55)).is_none());
+        // Esigin hemen iki yani.
+        assert!(kapsam_uyarisi(Some(COVERAGE_WARN - 0.001)).is_some());
+        assert!(kapsam_uyarisi(Some(COVERAGE_WARN + 0.001)).is_none());
     }
 
     /// Ortamdan gelen efekt adlari dogru moda esleniyor mu.

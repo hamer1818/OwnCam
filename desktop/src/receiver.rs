@@ -67,6 +67,8 @@ pub struct EffectShared {
     pub error: Option<String>,
     /// Kullanilan ekran kartinin adi; arayuzde gosteriliyor.
     pub gpu: Option<String>,
+    /// Son karedeki maske kapsami (0..1). Efekt kapaliyken `None`.
+    pub coverage: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,6 +268,9 @@ fn run(
                             break;
                         }
                     };
+                    if done.coverage != effects.lock().unwrap().coverage {
+                        effects.lock().unwrap().coverage = done.coverage;
+                    }
                     if let Some(stdin) = writer.as_mut().and_then(|w| w.stdin.as_mut()) {
                         // Sanal kamera okumayi birakirsa yazma hata verir;
                         // akisi kesmek yerine dongu yeniden baglanir.

@@ -66,16 +66,18 @@ struct Params {
     blur_radius: u32,
     color: [f32; 4],
     sharpness: f32,
-    _pad: [f32; 3],
+    coverage_off: u32,
+    _pad: [f32; 2],
 }
 
-const PIPELINE_NAMES: [&str; 6] = [
+const PIPELINE_NAMES: [&str; 7] = [
     "to_network_input",
     "shrink",
     "blur_h",
     "blur_v",
     "composite",
     "preview_shrink",
+    "mask_coverage",
 ];
 const TO_INPUT: usize = 0;
 const SHRINK: usize = 1;
@@ -83,6 +85,7 @@ const BLUR_H: usize = 2;
 const BLUR_V: usize = 3;
 const COMPOSITE: usize = 4;
 const PREVIEW: usize = 5;
+const COVERAGE: usize = 6;
 
 /// Onizleme piksel butcesi. Alana gore olcekleniyor, genislige gore degil:
 /// dik karede genislige gore olceklemek uc kat trafik uretiyordu.
@@ -100,6 +103,7 @@ struct Sized {
     preview: wgpu::Buffer,
     read_full: wgpu::Buffer,
     read_preview: wgpu::Buffer,
+    read_coverage: wgpu::Buffer,
     bind: wgpu::BindGroup,
 }
 
@@ -117,6 +121,9 @@ pub struct Processed {
     pub rgba: Vec<u8>,
     pub preview: Vec<u8>,
     pub preview_size: (u32, u32),
+    /// Maskenin ortalamasi (0..1). Efekt kapaliyken `None` - ag kosmuyor.
+    /// Arayuz bunu "kisi bulunamadi" uyarisi icin kullaniyor.
+    pub coverage: Option<f32>,
 }
 
 impl Processor {
@@ -276,6 +283,11 @@ impl Processor {
             (preview_w as u64) * (preview_h as u64) * 4,
             wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         );
+        let read_coverage = buf(
+            "okuma-kapsam",
+            4,
+            wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        );
 
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("efektler"),
@@ -328,6 +340,7 @@ impl Processor {
             preview,
             read_full,
             read_preview,
+            read_coverage,
             bind,
         });
     }
@@ -388,7 +401,8 @@ impl Processor {
             blur_radius,
             color,
             sharpness: settings.sharpness,
-            _pad: [0.0; 3],
+            coverage_off: self.seg.scratch_offset(),
+            _pad: [0.0; 2],
         };
         self.seg
             .queue
@@ -407,10 +421,13 @@ impl Processor {
                 label: Some("kare"),
                 timestamp_writes: None,
             });
+            // COVERAGE disindaki cekirdekler cikti elemani basina bir
+            // parcacik calistiriyor; kapsam tek is grubunda indirgiyor.
             let run = |pass: &mut wgpu::ComputePass<'_>, idx: usize, threads: u32| {
                 pass.set_pipeline(&self.pipelines[idx]);
                 pass.set_bind_group(0, &s.bind, &[]);
-                pass.dispatch_workgroups(groups(threads), 1, 1);
+                let n = if idx == COVERAGE { 1 } else { groups(threads) };
+                pass.dispatch_workgroups(n, 1, 1);
             };
 
             if background != Background::Off {
@@ -420,6 +437,9 @@ impl Processor {
                     (super::gpu::INPUT.w * super::gpu::INPUT.h) as u32,
                 );
                 self.seg.encode(&mut pass);
+                // Maske kapsami: modelin kisiyi bulup bulamadigini arayuze
+                // bildirmek icin. Tek is grubu.
+                run(&mut pass, COVERAGE, 1);
                 if blur_radius > 0 {
                     let small = s.small_w * s.small_h;
                     run(&mut pass, SHRINK, small);
@@ -434,15 +454,32 @@ impl Processor {
         let preview_bytes = (s.preview_w as u64) * (s.preview_h as u64) * 4;
         encoder.copy_buffer_to_buffer(&s.out, 0, &s.read_full, 0, full_bytes);
         encoder.copy_buffer_to_buffer(&s.preview, 0, &s.read_preview, 0, preview_bytes);
+        let effects_on = background != Background::Off;
+        if effects_on {
+            encoder.copy_buffer_to_buffer(
+                &self.seg.arena,
+                self.seg.scratch_offset() as u64 * 4,
+                &s.read_coverage,
+                0,
+                4,
+            );
+        }
         self.seg.queue.submit(Some(encoder.finish()));
 
         let full = read_back(&self.seg.device, &s.read_full)?;
         let preview = read_back(&self.seg.device, &s.read_preview)?;
+        let coverage = if effects_on {
+            let bytes = read_back(&self.seg.device, &s.read_coverage)?;
+            Some(f32::from_le_bytes(bytes[..4].try_into().unwrap()))
+        } else {
+            None
+        };
 
         Ok(Processed {
             rgba: full,
             preview,
             preview_size: (s.preview_w, s.preview_h),
+            coverage,
         })
     }
 }
@@ -507,6 +544,66 @@ mod tests {
             kirmizi * 2 > (w * h) as usize,
             "kare cogunlukla arka plan rengi olmaliydi, {kirmizi} piksel"
         );
+    }
+
+    /// Kapsam degeri gercekten maskeyi olcuyor mu.
+    ///
+    /// Demirbas portre (bas-omuz cercevesi) yuksek kapsam vermeli; kisiye
+    /// benzemeyen sentetik bir kare neredeyse sifir. Ikisi arasindaki fark
+    /// arayuzdeki "kisi bulunamadi" uyarisinin dayandigi sey.
+    #[test]
+    fn kapsam_kisiyi_ayirt_ediyor() {
+        let Some(mut p) = islemci() else { return };
+        let ayar = Settings {
+            background: Background::Color([0.0, 0.0, 1.0]),
+            sharpness: 0.35,
+        };
+
+        // Demirbas 256x256 HWC u8; RGBA'ya cevir.
+        const GIRDI: &[u8] = include_bytes!("../../tests/fixtures/girdi_u8.bin");
+        let mut portre = vec![255u8; 256 * 256 * 4];
+        for i in 0..256 * 256 {
+            portre[i * 4..i * 4 + 3].copy_from_slice(&GIRDI[i * 3..i * 3 + 3]);
+        }
+        let kisi = p
+            .process(256, 256, &portre, ayar)
+            .unwrap()
+            .coverage
+            .expect("efekt acikken kapsam gelmeli");
+
+        // Gercekci "kisi yok" sahnesi: duz bir duvar. (Yapay gurultu deseni
+        // uygun degil - ag onu kismen kisi sanip ~0,19 veriyor, oysa gercek
+        // bir kamera oyle bir kare uretmiyor.)
+        let duvar = vec![190u8; 256 * 256 * 4];
+        let bos = p.process(256, 256, &duvar, ayar).unwrap().coverage.unwrap();
+
+        eprintln!("kapsam: portre {kisi:.4}, duz duvar {bos:.4}");
+        assert!(kisi > 0.2, "portrede kapsam dusuk cikti: {kisi}");
+        // Arayuzdeki esikle ayni sabiti kullaniyoruz: uyari esigi degisirse
+        // bu test de onunla birlikte anlamli kalsin.
+        assert!(
+            bos < crate::app::COVERAGE_WARN,
+            "duvarda kapsam yuksek cikti: {bos}"
+        );
+    }
+
+    /// Efekt kapaliyken kapsam raporlanmamali - ag hic kosmuyor.
+    #[test]
+    fn kapali_efektte_kapsam_yok() {
+        let Some(mut p) = islemci() else { return };
+        let kare = vec![128u8; 64 * 64 * 4];
+        let out = p
+            .process(
+                64,
+                64,
+                &kare,
+                Settings {
+                    background: Background::Off,
+                    sharpness: 0.0,
+                },
+            )
+            .unwrap();
+        assert!(out.coverage.is_none());
     }
 
     /// Efekt kapaliyken kare degismeden gecmeli.

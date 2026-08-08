@@ -28,7 +28,8 @@ struct Params {
     color: vec4<f32>,
     // Maske kenarini sertlestirme: 0 ham maske, buyudukce daha keskin gecis.
     sharpness: f32,
-    _pad0: f32,
+    // Arenadaki calisma alani: maske kapsami buraya yaziliyor.
+    coverage_off: u32,
     _pad1: f32,
     _pad2: f32,
 };
@@ -240,7 +241,39 @@ fn composite(@builtin(global_invocation_id) gid: vec3<u32>) {
     out_buf[idx] = pack(vec4<f32>(mix(bg.rgb, src.rgb, m), 1.0));
 }
 
-// ---- 4) onizleme icin kucult ------------------------------------------
+// ---- 4) maske kapsami --------------------------------------------------
+//
+// Modelin kisiyi bulup bulamadigini arayuze bildirmek icin maskenin
+// ortalamasi. Tek is grubu yetiyor: 256x256 = 65536 deger.
+//
+// Sonuc arenanin sonundaki calisma alanina yaziliyor; ayri bir depolama
+// tamponu baglamak gerekmiyor (kompozit zaten sinirdaki 8 tamponu kullaniyor).
+
+var<workgroup> kapsam_kismi: array<f32, 64>;
+
+@compute @workgroup_size(64)
+fn mask_coverage(@builtin(local_invocation_id) lid: vec3<u32>) {
+    let n = p.mask_w * p.mask_h;
+    var sum = 0.0;
+    for (var i = lid.x; i < n; i = i + 64u) {
+        sum = sum + arena[p.mask_off + i];
+    }
+    kapsam_kismi[lid.x] = sum;
+    workgroupBarrier();
+
+    for (var stride = 32u; stride > 0u; stride = stride >> 1u) {
+        if (lid.x < stride) {
+            kapsam_kismi[lid.x] = kapsam_kismi[lid.x] + kapsam_kismi[lid.x + stride];
+        }
+        workgroupBarrier();
+    }
+
+    if (lid.x == 0u) {
+        arena[p.coverage_off] = kapsam_kismi[0] / f32(n);
+    }
+}
+
+// ---- 5) onizleme icin kucult ------------------------------------------
 
 @compute @workgroup_size(64)
 fn preview_shrink(@builtin(global_invocation_id) gid: vec3<u32>) {
