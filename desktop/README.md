@@ -70,10 +70,10 @@ kullanilmadi ve sebebi olculdu:
 | Yol | Kare basina | Ikiliye etkisi |
 |---|---|---|
 | `tract` (ONNX, islemci) | **32 ms** | +35 MB |
-| kendi WGSL cekirdeklerimiz | **1,99 ms** | +4,2 MB |
+| kendi WGSL cekirdeklerimiz | **1,35 ms** | +4,2 MB |
 
 30 fps'in kare butcesi 33 ms. Islemcideki cozum butceyi tek basina doldurup
-bir cekirdegi tam mesgul ediyordu; GPU yolu butcenin %6'sini kullaniyor ve
+bir cekirdegi tam mesgul ediyordu; GPU yolu butcenin %4'unu kullaniyor ve
 Vulkan/OpenGL uzerinden her ekran kartinda calisiyor - NVIDIA'ya bagli degil.
 
 Modulun bolumleri:
@@ -89,7 +89,9 @@ Modulun bolumleri:
   sevke doniyor.
 - `seg/seg.wgsl` - evrisim (gruplu; `group == kanal` oldugunda derinlemesine),
   transpoze evrisim, iki dogrusal buyutme, kuresel ortalama ve eleman bazli
-  cekirdekler. Butun ara tensorler tek bir arena tamponunu (30 MB), butun
+  cekirdekler. Kuresel ortalama is grubu basina bir kanal alip paylasilan
+  bellekte agac indirgeme yapiyor. Butun ara tensorler tek bir arena
+  tamponunu (30 MB), butun
   agirliklar tek bir tamponu paylasiyor; her sevk yalnizca kayma tasiyor.
   Boylece 136 adim icin tek baglama grubu yetiyor.
 - `seg/effects.wgsl` - kompozit. Bulanik arka plan **ceyrek cozunurlukte**
@@ -160,8 +162,8 @@ Bu sistemde (RTX 5080, Vulkan), telefon 1280x720 @ 30 fps, arka plan bulanik:
 
 | Olcu | Efekt kapali | Efekt acik (bulanik) |
 |---|---|---|
-| segmentasyon | — | 1,99 ms/kare |
-| tam boru hatti (yukleme + ag + bulanik + kompozit + geri okuma) | — | ~2,5 ms/kare |
+| segmentasyon | — | 1,35 ms/kare |
+| tam boru hatti (yukleme + ag + bulanik + kompozit + geri okuma) | — | ~2,1 ms/kare |
 | islemci (owncam + butun ffmpeg surecleri) | tek cekirdegin %12,7'si | tek cekirdegin %21,5'i |
 | GPU | %4 | %21 |
 | telefonda dusen kare | 0 | 0 |

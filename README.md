@@ -104,7 +104,7 @@ Sag paneldeki **Arka plan** bolumunden secilir:
 **Kenar sertligi** kaydiraci maskenin gecisini ayarliyor: dusuk deger sac gibi
 ince yapilarda daha dogru, yuksek deger daha keskin bir kesim veriyor.
 
-Efekt ekran kartinda kosuyor — bu sistemde kare basina 2,5 ms. Islemcide ayni
+Efekt ekran kartinda kosuyor — bu sistemde kare basina 2,1 ms. Islemcide ayni
 is 32 ms surerdi, yani 30 fps butcesini tek basina doldururdu; olcum ve gerekce
 icin `desktop/README.md`.
 

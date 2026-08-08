@@ -143,18 +143,44 @@ fn resize(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 
 // ---- kuresel ortalama: [1,C,H,W] -> [1,C,1,1] ---------------------------
+//
+// **Is grubu basina bir kanal.** Onceki surumde kanal basina tek is parcacigi
+// vardi ve H*W (128x128'e kadar) seri toplaniyordu; 16-128 parcacikla ekran
+// karti neredeyse bos duruyordu. Simdi 64 parcacik once serpistirilmis
+// okuyup kismi toplam biriktiriyor, sonra paylasilan bellekte agac indirgeme
+// yapiyor.
+
+var<workgroup> partial: array<f32, 64>;
 
 @compute @workgroup_size(64)
-fn reduce_mean(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let oc = gid.x;
-    if (oc >= p.out_c) { return; }
+fn reduce_mean(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    // Sevk tam olarak kanal sayisi kadar is grubu aciyor, bu yuzden sinir
+    // denetimi gerekmiyor - ve gerekmemesi iyi: erken donus, asagidaki
+    // bariyerlerin tekduze akista kalmasini bozardi.
+    let oc = wg.x;
     let n = p.in_h * p.in_w;
     let base = p.a + oc * n;
+
     var sum = 0.0;
-    for (var i = 0u; i < n; i = i + 1u) {
+    for (var i = lid.x; i < n; i = i + 64u) {
         sum = sum + arena[base + i];
     }
-    arena[p.out + oc] = sum / f32(n);
+    partial[lid.x] = sum;
+    workgroupBarrier();
+
+    for (var stride = 32u; stride > 0u; stride = stride >> 1u) {
+        if (lid.x < stride) {
+            partial[lid.x] = partial[lid.x] + partial[lid.x + stride];
+        }
+        workgroupBarrier();
+    }
+
+    if (lid.x == 0u) {
+        arena[p.out + oc] = partial[0] / f32(n);
+    }
 }
 
 // ---- eleman bazli ------------------------------------------------------

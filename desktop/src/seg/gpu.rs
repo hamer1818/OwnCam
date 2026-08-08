@@ -24,6 +24,9 @@ pub const INPUT: Shape = Shape {
 
 const MODEL: &[u8] = include_bytes!("../../assets/selfie_segmentation.onnx");
 
+/// `seg.wgsl` icindeki butun `@workgroup_size` degerleriyle ayni olmali.
+const WORKGROUP: u32 = 64;
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Params {
@@ -86,12 +89,15 @@ fn entry_point(kind: Kind) -> &'static str {
     }
 }
 
-/// Bir adimin kac is parcacigi gerektirdigi.
-fn threads(step: &plan::Step) -> u32 {
+/// Bir adimin kac **is grubu** gerektirdigi.
+///
+/// Cogu cekirdek cikti elemani basina bir parcacik calistiriyor. Kuresel
+/// ortalama farkli: is grubu basina bir kanal alip 64 parcacikla indirgiyor,
+/// bu yuzden grup sayisi dogrudan kanal sayisi.
+fn workgroups(step: &plan::Step) -> u32 {
     match step.kind {
-        // Kanal basina tek parcacik; H,W uzerinde seri toplam.
         Kind::ReduceMean => step.out_shape.c as u32,
-        _ => step.out_shape.len() as u32,
+        _ => (step.out_shape.len() as u32).div_ceil(WORKGROUP),
     }
 }
 
@@ -104,7 +110,7 @@ pub struct Segmenter {
     readback: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     pipelines: Vec<wgpu::ComputePipeline>,
-    /// Adim -> (boru hatti indeksi, uniform dinamik kayma, is parcacigi sayisi)
+    /// Adim -> (boru hatti indeksi, uniform dinamik kayma, is grubu sayisi)
     dispatch: Vec<(usize, u32, u32)>,
     plan: Plan,
     pub adapter_name: String,
@@ -205,7 +211,7 @@ impl Segmenter {
                 kinds.push(step.kind);
             }
             let pipeline = kinds.iter().position(|k| *k == step.kind).unwrap();
-            dispatch.push((pipeline, at as u32, threads(step)));
+            dispatch.push((pipeline, at as u32, workgroups(step)));
         }
         let params = create_init_buffer(
             &device,
@@ -329,13 +335,13 @@ impl Segmenter {
     /// komut tamponunu paylasmak icin ayri duruyor: kare basina tek gonderim.
     pub fn encode(&self, pass: &mut wgpu::ComputePass<'_>) {
         let mut current = usize::MAX;
-        for (pipeline, offset, threads) in &self.dispatch {
+        for (pipeline, offset, groups) in &self.dispatch {
             if *pipeline != current {
                 pass.set_pipeline(&self.pipelines[*pipeline]);
                 current = *pipeline;
             }
             pass.set_bind_group(0, &self.bind_group, &[*offset]);
-            pass.dispatch_workgroups(threads.div_ceil(64), 1, 1);
+            pass.dispatch_workgroups(*groups, 1, 1);
         }
     }
 

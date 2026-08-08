@@ -120,7 +120,7 @@ The segmentation network runs in **our own WGSL compute kernels** on a
 headless wgpu device, not in an inference library. That was a measured
 decision, not a preference: `tract` solves this model in **32 ms/frame** on
 the CPU (the 30 fps budget is 33 ms) and adds 35 MB to the binary; the WGSL
-kernels take **1.99 ms** and add 4.2 MB. The device is headless so processing
+kernels take **1.35 ms** and add 4.2 MB. The device is headless so processing
 runs off the egui paint loop — minimising the window must not stall the
 virtual camera.
 
