@@ -165,12 +165,22 @@ Bu sistemde (RTX 5080, Vulkan), telefon 1280x720 @ 30 fps, arka plan bulanik:
 | segmentasyon | — | 1,35 ms/kare |
 | tam boru hatti (yukleme + ag + bulanik + kompozit + geri okuma) | — | ~2,1 ms/kare |
 | islemci (owncam + butun ffmpeg surecleri) | tek cekirdegin %12,7'si | tek cekirdegin %21,5'i |
+| ^ ayni olcum YUV420 ciktisindan **once** | — | (bkz. asagidaki A/B) |
 | GPU | %4 | %21 |
 | telefonda dusen kare | 0 | 0 |
 
-Efektin bedeli yaklasik **+9 puan islemci** ve **+17 puan GPU**. Islemci
-tarafindaki artis segmentasyondan degil, ikinci ffmpeg surecinden ve tam
-cozunurluklu kareleri borulardan gecirmekten geliyor.
+Efektin bedeli **+17 puan GPU**. Islemci tarafindaki artis segmentasyondan
+degil, ikinci ffmpeg surecinden ve kareleri borulardan gecirmekten geliyordu;
+kompozit dogrudan YUV420 uretmeye baslayinca buyuk olcude kapandi:
+
+| Cikis bicimi | Toplam islemci (emulator kaynagi, 720x1280, bulanik) |
+|---|---|
+| RGBA | %15,5 |
+| **YUV420** | **%9,7** |
+
+Geri okunan bayt piksel basina 4'ten 1,5'e iniyor ve ikinci ffmpeg donusum
+yapmak yerine kareyi oldugu gibi geciriyor. Renk uzayinda gidip gelmenin
+hatasi ortalama 0,90/255 - pratikte kayipsiz.
 
 | | |
 |---|---|

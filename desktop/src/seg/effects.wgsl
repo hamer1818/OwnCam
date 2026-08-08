@@ -30,7 +30,9 @@ struct Params {
     sharpness: f32,
     // Arenadaki calisma alani: maske kapsami buraya yaziliyor.
     coverage_off: u32,
-    _pad1: f32,
+    // `out_buf` icinde YUV420 duzleminin basladigi kelime indeksi. RGBA
+    // bolgesinden sonra geliyor, bu yuzden ustune yazma riski yok.
+    yuv_word_off: u32,
     _pad2: f32,
 };
 
@@ -273,7 +275,82 @@ fn mask_coverage(@builtin(local_invocation_id) lid: vec3<u32>) {
     }
 }
 
-// ---- 5) onizleme icin kucult ------------------------------------------
+// ---- 5) RGBA -> YUV420 (planar) ---------------------------------------
+//
+// Sanal kameraya YUV420 gidiyor. Kompozit ciktisini burada cevirince iki sey
+// kazaniliyor: geri okunan bayt **2,7 kat** aza iniyor (piksel basina 4 ->
+// 1,5) ve ikinci ffmpeg donusum yapmak yerine kareyi oldugu gibi geciriyor.
+//
+// Yeni bir depolama tamponu baglanmiyor - kompozit zaten sinirdaki 8 tamponu
+// kullaniyor. YUV, `out_buf`in RGBA bolgesinden **sonrasina** yaziliyor.
+//
+// Her is parcacigi tam bir u32 (4 bayt) uretiyor; boylece bayt yazarken
+// okuma-degistirme-yazma yarisi olusmuyor. Bu, genislige `% 4 == 0` sarti
+// getiriyor - saglanmazsa Rust tarafi RGBA yoluna dusuyor.
+
+/// BT.601 sinirli aralik - ffmpeg'in `rgba -> yuv420p` varsayilaniyla ayni,
+/// boylece renkler bu gecisten once ve sonra birebir ayni kaliyor.
+fn rgb_to_y(c: vec3<f32>) -> f32 {
+    return 16.0 + 65.481 * c.r + 128.553 * c.g + 24.966 * c.b;
+}
+fn rgb_to_u(c: vec3<f32>) -> f32 {
+    return 128.0 - 37.797 * c.r - 74.203 * c.g + 112.0 * c.b;
+}
+fn rgb_to_v(c: vec3<f32>) -> f32 {
+    return 128.0 + 112.0 * c.r - 93.786 * c.g - 18.214 * c.b;
+}
+
+fn pack_byte(packed: u32, value: f32, slot: u32) -> u32 {
+    return packed | (u32(clamp(value, 0.0, 255.0) + 0.5) << (slot * 8u));
+}
+
+@compute @workgroup_size(64)
+fn to_yuv_luma(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let word = gid.x;
+    if (word >= (p.width * p.height) / 4u) { return; }
+    // Genislik 4'un kati oldugundan bu dort piksel hep ayni satirda.
+    let base = word * 4u;
+    var packed = 0u;
+    for (var k = 0u; k < 4u; k = k + 1u) {
+        packed = pack_byte(packed, rgb_to_y(unpack(out_buf[base + k]).rgb), k);
+    }
+    out_buf[p.yuv_word_off + word] = packed;
+}
+
+@compute @workgroup_size(64)
+fn to_yuv_chroma(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let uv_w = p.width / 2u;
+    let uv_h = p.height / 2u;
+    let plane_words = (uv_w * uv_h) / 4u;
+    let word = gid.x;
+    if (word >= plane_words * 2u) { return; }
+
+    // Ilk yari U duzlemi, ikinci yari V duzlemi.
+    let is_v = word >= plane_words;
+    let local = word - select(0u, plane_words, is_v);
+    let base = local * 4u;
+
+    var packed = 0u;
+    for (var k = 0u; k < 4u; k = k + 1u) {
+        let i = base + k;
+        let ux = i % uv_w;
+        let uy = i / uv_w;
+        // 2x2 blogun ortalamasi - 4:2:0 alt orneklemesi.
+        var acc = vec3<f32>(0.0);
+        for (var dy = 0u; dy < 2u; dy = dy + 1u) {
+            for (var dx = 0u; dx < 2u; dx = dx + 1u) {
+                acc = acc + unpack(out_buf[(uy * 2u + dy) * p.width + ux * 2u + dx]).rgb;
+            }
+        }
+        acc = acc * 0.25;
+        packed = pack_byte(packed, select(rgb_to_u(acc), rgb_to_v(acc), is_v), k);
+    }
+
+    let luma_words = (p.width * p.height) / 4u;
+    out_buf[p.yuv_word_off + luma_words + word] = packed;
+}
+
+// ---- 6) onizleme icin kucult ------------------------------------------
 
 @compute @workgroup_size(64)
 fn preview_shrink(@builtin(global_invocation_id) gid: vec3<u32>) {

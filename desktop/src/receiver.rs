@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::seg::effects::{Processor, Settings as EffectSettings};
+use crate::seg::effects::{output_format, Processor, Settings as EffectSettings};
 use crate::sink::Sink;
 
 /// Pencereye cizilecek en son kare. Kuyruk **yok**: arayuz geride kalirsa
@@ -274,7 +274,7 @@ fn run(
                     if let Some(stdin) = writer.as_mut().and_then(|w| w.stdin.as_mut()) {
                         // Sanal kamera okumayi birakirsa yazma hata verir;
                         // akisi kesmek yerine dongu yeniden baglanir.
-                        if stdin.write_all(&done.rgba).is_err() {
+                        if stdin.write_all(&done.frame).is_err() {
                             break;
                         }
                     }
@@ -388,11 +388,14 @@ fn spawn_writer(
         return Ok(None); // sanal kamera yok: uygulama izleyici olarak calisir
     };
     let (w, h) = config.frame;
+    // Kompozit kareyi dogrudan sanal kameranin bekledigi bicimde uretiyor;
+    // burada donusum yapilmiyor, bayt bayt geciyor.
+    let pix_fmt = output_format(w, h).ffmpeg_pix_fmt();
     let mut cmd = Command::new("ffmpeg");
     cmd.args(["-hide_banner", "-loglevel", "error"])
         .args(["-fflags", "nobuffer"])
         .args(["-f", "rawvideo"])
-        .args(["-pix_fmt", "rgba"])
+        .args(["-pix_fmt", pix_fmt])
         .args(["-s", &format!("{w}x{h}")])
         .args(["-r", &config.fps.to_string()])
         .args(["-i", "-"])

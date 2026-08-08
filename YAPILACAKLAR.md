@@ -46,20 +46,27 @@ Bir tuzak vardi, dusuldu: donus 0 ve onizleme kapaliyken GL katmani tamamen
 atlaniyordu (kamera dogrudan kodlayiciya). Ayna da GL'de uygulandigi icin o
 kisayol artik `!config.mirror` de ariyor.
 
-### 2.2 Boru hatti kilitlenebiliyor — duzeltme cihazda dogrulanmadi
+### 2.2 Boru hatti kilitlenmesi — EMULATORDE GECTI, gercek cihazda bekliyor
 
-`CLAUDE.md` "Known issues"ta duruyor: kare uretimi ~10 karede durmus, uygulama
-sureci yasarken. Suphe edilen sebep, SurfaceView yok edildikten sonra onizleme
-EGL yuzeyinin vsync'e kilitlenip `eglSwapBuffers`'ta sonsuz beklemesi.
+Suphe: SurfaceView yok edildikten sonra onizleme EGL yuzeyinin vsync'e
+kilitlenip `eglSwapBuffers`'ta sonsuz beklemesi. `EglCore.setSwapInterval(0)`
+bunun icin eklenmisti ama dogrulanmamisti.
 
-`EglCore.setSwapInterval(0)` bunun icin eklendi ama **cihazda dogrulanmadi.**
+Emulatorde (Pixel 10 Pro XL) sinandi — uc asama da 30 fps'te kilitli ilerledi:
 
-Dogrulama yolu belli: uygulamayi arka plana at / ekrani kapat, 10-15 dakika
-bekle, sonra `owncam-status.sh` ile asama sayaclarina bak
-(`cameraFrames` -> `glDraws` -> `encoderOutputs` -> `framesSent`). Hangisi
-duruyorsa tikanma orada.
+| Durum | Sonuc |
+|---|---|
+| On planda | 30 fps |
+| HOME ile arka planda | 30 fps |
+| Ekran kapali | 30 fps |
+| Ekran acilip on plana donunce | 30 fps, toparliyor |
 
-Dogrulanana kadar gecerli gecici cozum: uygulamayi on planda tut.
+12 dakikalik surekli kosuda 0 dusen kare, OwnCam'e ait tek bir EGL hatasi yok.
+
+**Ama bu kanit degil, delil.** Emulatorun EGL/SurfaceView gerceklemesi gercek
+telefonunkiyle ayni degil ve ozgun gozlem gercek cihazdaydi. Nihai soz hâlâ
+telefonda: bir kez uzun sureli arka planda birakip
+`owncam-status.sh` ile sayaclara bak.
 
 ### 2.3 Uzun sureli dayaniklilik olculmedi
 
@@ -112,26 +119,36 @@ karsiliginda olculebilir bir kazanc yok.
 Not: bu bir **alt sinir**. Gercek bir dizide harekete bagli degisim de olur,
 ama o istenen degisim; titreme degil.
 
-### 3.3 Efektin islemci bedeli gereginden yuksek
+### 3.3 Efektin islemci bedeli — YUV420 ile %37 dustu
 
-Olculdu: efekt acikken toplam islemci %12,7 -> %21,5. Artis segmentasyondan
-**degil** — GPU tarafi 1,99 ms. Bedel ikinci ffmpeg surecinden ve tam
-cozunurluklu RGBA kareleri borulardan gecirmekten geliyor.
+Bedelin segmentasyondan gelmedigi olculmustu (GPU tarafi 1,35 ms); kaynak
+ikinci ffmpeg'in RGBA->YUV donusumu ve tam cozunurluklu kareleri borulardan
+gecirmekti.
 
-Iki yol var, ikisi de denenmedi:
+Kompozit artik dogrudan YUV420 uretiyor: geri okunan bayt piksel basina
+4'ten 1,5'e iniyor (2,67 kat az) ve ikinci ffmpeg donusum yerine kareyi
+oldugu gibi geciriyor.
 
-- Kompozit shader'i RGBA yerine dogrudan YUV420 uretsin: boru trafigi yariya
-  iner, ikinci ffmpeg donusum yapmaz.
-- Uygulama `/dev/video11`'e dogrudan yazsin (`VIDIOC_S_FMT` + `write`),
-  ikinci ffmpeg tamamen kalksin. Daha az surec ama `unsafe` ioctl gerekir.
+A/B olcum (emulator kaynagi, 720x1280 @ 30 fps, arka plan bulanik):
 
-Ilki daha az risk, once o denenmeli.
+| Cikis bicimi | Toplam islemci (owncam + butun ffmpeg) |
+|---|---|
+| RGBA (onceki) | %15,5 |
+| YUV420 (yeni) | **%9,7** |
 
-### 3.4 `reduce_mean` cekirdegi GPU'yu bos birakiyor
+Renk uzayinda gidip gelmenin hatasi ortalama 0,90/255 — pratikte kayipsiz.
 
-Kanal basina tek is parcacigi, H*W uzerinde seri toplam. 16-128 parcacikla
-GPU neredeyse bos duruyor. Toplam butce zaten karsilandigi icin **acil degil**;
-butce sikisirsa ilk bakilacak yer burasi (paralel indirgeme).
+Kalan secenek (yapilmadi): uygulama `/dev/video11`'e dogrudan yazsin
+(`VIDIOC_S_FMT` + `write`), ikinci ffmpeg tamamen kalksin. Artik kazanc
+daha kucuk ve `unsafe` ioctl gerektiriyor; gerekce zayifladi.
+
+### 3.4 `reduce_mean` cekirdegi — PARALELLESTIRILDI
+
+Kanal basina tek is parcacigi vardi ve H*W uzerinde seri topluyordu; 16-128
+parcacikla GPU neredeyse bos duruyordu. Artik is grubu basina bir kanal:
+64 parcacik serpistirilmis okuyup paylasilan bellekte agac indirgeme yapiyor.
+
+Olcum: **1,99 -> 1,35 ms/kare** (%32). Maske referansla birebir kaldi.
 
 ---
 
