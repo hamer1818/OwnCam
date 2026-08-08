@@ -281,7 +281,16 @@ Yukaridaki maddelerin cogu kapandi. Acik kalanlar ve **neden** acik kaldiklari:
 | 5. uyarlanabilir bit hizi | bitti, cihazda dogrulandi |
 | 5. tepsi simgesi, AUR paketi | bilerek yapilmadi |
 
-Listedeki butun maddeler kapandi.
+Listedeki butun maddeler kapandi. Arka plan bulaniklastirma gercek donanimda
+uctan uca calisir halde dogrulandi (telefon -> GPU -> `/dev/video11`), yuk
+tek cekirdegin %12,4'u ve GPU %11.
+
+Bir uyari, pahaliya mal oldugu icin buraya da: **uctan uca demek gercek
+tuketiciyi calistirmak demek.** Durum ucunu `curl` ile dogrulamak yetmedi -
+JSON'a kazara ikinci bir `bitrate` alani girdi, curl ve python bunu hos gordu,
+`serde` reddetti ve uygulama tamamen sessiz kaldi. Simdi hem alici yasam
+dongusu stderr'e yaziliyor hem de Kotlin sablonunu okuyup cift anahtar arayan
+bir test var.
 
 Sonraki adim icin en degerli aday **3.1**: model bas-omuz cercevesi disinda
 zayif. RVM gibi daha iyi bir model kalitesi artirir ama 1,35 ms'lik butceyi
