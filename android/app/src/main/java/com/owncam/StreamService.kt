@@ -447,7 +447,6 @@ class StreamService : Service(), CameraEncoder.Listener {
           "exposureLocked": ${config.lockExposure},
           "focusLocked": ${config.lockFocus},
           "adaptiveBitrate": ${config.adaptiveBitrate},
-          "bitrate": ${config.bitRate},
           "bitrateNow": ${encoder?.appliedBitrate ?: config.bitRate},
           "cameraFrames": ${cam?.cameraFrames ?: 0},
           "glDraws": ${cam?.glDraws ?: 0},

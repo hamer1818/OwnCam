@@ -132,6 +132,46 @@ fn encode(value: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Telefonun durum JSON'unda **cift anahtar** olmamali.
+    ///
+    /// Bir kez oldu ve pahaliya mal oldu: `bitrate` alani sablona ikinci kez
+    /// eklendi. `curl` ve cogu betik dili cift anahtari sessizce hos goruyor,
+    /// `serde` ise butun belgeyi reddediyor - alici hic kurulamadigi icin
+    /// uygulama tamamen sessiz kaldi, tek belirti "hicbir sey olmuyor"du.
+    ///
+    /// Sozlesme Kotlin tarafinda tanimlandigi icin test dogrudan o kaynaga
+    /// bakiyor; boylece telefon ya da emulator olmadan da koruyor.
+    #[test]
+    fn durum_json_sablonunda_cift_anahtar_yok() {
+        const KOTLIN: &str = include_str!(
+            "../../android/app/src/main/java/com/owncam/StreamService.kt"
+        );
+        // Sablonun govdesi: `"streaming"` ile `"client"` arasi.
+        let start = KOTLIN.find("\"streaming\"").expect("durum sablonu bulunamadi");
+        let end = KOTLIN[start..].find("\"client\"").expect("sablon sonu bulunamadi") + start;
+        let mut keys: Vec<&str> = Vec::new();
+        for line in KOTLIN[start..=end].lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix('"') {
+                if let Some(i) = rest.find('"') {
+                    keys.push(&rest[..i]);
+                }
+            }
+        }
+        assert!(keys.len() > 20, "sablon ayristirilamadi: {} anahtar", keys.len());
+
+        let mut seen: Vec<&str> = Vec::new();
+        let mut dupes: Vec<&str> = Vec::new();
+        for k in &keys {
+            if seen.contains(k) {
+                dupes.push(k);
+            } else {
+                seen.push(k);
+            }
+        }
+        assert!(dupes.is_empty(), "durum JSON'unda cift anahtar: {dupes:?}");
+    }
+
     #[test]
     fn kare_boyutu_ayristirilir() {
         let s = Status {

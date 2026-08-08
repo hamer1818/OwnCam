@@ -329,10 +329,14 @@ impl OwnCamApp {
             return;
         };
         if !status.streaming {
+            if self.receiver.is_some() {
+                eprintln!("[alici] telefon yayini durdurdu, alici kapatiliyor");
+            }
             self.receiver = None;
             return;
         }
         let Some(frame) = status.frame_size() else {
+            eprintln!("[alici] telefon kare boyutu bildirmedi: {:?}", status.frame);
             return;
         };
         let wanted = ReceiverConfig {
@@ -346,6 +350,10 @@ impl OwnCamApp {
         if self.receiver.as_ref().map(|r| &r.config) == Some(&wanted) {
             return;
         }
+        eprintln!(
+            "[alici] kuruluyor: {} {}x{} @{} fps, efekt {}",
+            wanted.host, frame.0, frame.1, wanted.fps, wanted.effects
+        );
         // Onceki aliciyi once dusur: iki ffmpeg ayni sanal kameraya yazamaz.
         self.receiver = None;
         let ctx = ctx.clone();
@@ -403,7 +411,12 @@ impl eframe::App for OwnCamApp {
                     };
                     self.status = Some(status);
                 }
-                Err(e) => self.status_line = e,
+                Err(e) => {
+                // Telefona ulasilamiyorsa sebebi ucuza gorunur olsun; arayuz
+                // kapaliyken tek ipucu bu satir oluyor.
+                eprintln!("[durum] {e}");
+                self.status_line = e;
+            }
             }
         }
         if self.last_poll.elapsed() >= POLL_INTERVAL {
