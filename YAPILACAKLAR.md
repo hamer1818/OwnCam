@@ -85,22 +85,29 @@ ilerlemesi de o yuzden yaniltici olmustu.
 
 Madde kapandi. `EglCore.setSwapInterval(0)` calisiyor.
 
-### 2.3 Uzun sureli dayaniklilik — emulatorde 14 dk temiz, telefonda bekliyor
+### 2.3 Uzun sureli dayaniklilik — OLCULDU, sorun yok
 
-Emulatorde 14 dakika kesintisiz: 25 828 kare, ortalama 29,98 fps, **0 dusen
-kare**, bozulma yok. Ama emulator isinmiyor ve termal kisma yapmiyor; asagidaki
-soru hâlâ gecerli ve yaniti yalnizca gercek telefon verebilir.
+Gercek telefonda (Huawei CLT-L09) 30 dakika kesintisiz olculdu. Kosullar
+gercek kullanima yakin secildi: **ekran kapali, uygulama arka planda**, ve
+akisi gercekten ceken bir istemci bagli (ilk denemede tuketici yoktu, TCP yolu
+hic yuklenmiyordu - o olcum atildi).
 
-`README.md` "Neden burada duruyoruz" bolumunun kendi tespiti: geriye kalan tek
-gercek belirsizlik uzun sureli davranis. Telefon bir saatlik toplantida isinip
-kare hizini dusuruyor mu, bilmiyoruz.
+| Olcu | Deger |
+|---|---|
+| Sure | 30 dakika |
+| Toplam kare | 48 812 uretildi, 48 811 gonderildi |
+| Dusen kare | **0** |
+| fps | ort 28,00 (min 27,52, max 28,50) |
+| Ilk 5 dk / son 5 dk | 28,03 / 28,15 fps |
+| Degisim | **+%0,42** (yani yok) |
+| Pil sicakligi | 37 -> 39 C |
 
-```bash
-owncam-measure.sh 15     # ilk uzun toplantidan hemen sonra
-```
+**Termal kisma yok.** Sicaklik 2 derece artti ve kare hizina hic yansimadi;
+son bes dakika ilk bes dakikadan bir tik daha iyi, aradaki fark olcum
+gurultusu.
 
-Sonucu plan bolum 2'deki tabloyla karsilastir. Bu bir "yapilacak is" degil,
-**yapilacak olcum** — sonucuna gore is cikabilir de cikmayabilir de.
+Not: sabit hiz 30 degil **28 fps**. Bu bir bozulma degil, cihazin surekli
+rejimi - onceki butun olcumlerde de 28-29 arasindaydi.
 
 ---
 
@@ -194,8 +201,8 @@ Kodda dogrulanan durum:
 |---|---|
 | Ayar ekrani (cozunurluk, bit hizi, on/arka kamera) | **bitti** — masaustu uygulamasinda |
 | Otomatik pozlama kilidi | **bitti** — `exposureLocked` |
-| Odak kilidi | **bitti** — `lockFocus`, AF tetigi ile kilit |
-| Uyarlanabilir bit hizi | **bitti** — dusen kare sayaci sinyal, x0,75 in / x1,15 cik |
+| Odak kilidi | **bitti**, cihazda kismen dogrulandi (asagida) |
+| Uyarlanabilir bit hizi | **bitti**, cihazda dogrulandi (asagida) |
 | Tepsi simgesi | yapilmadi (asagida) |
 | Paketleme (AUR PKGBUILD) | yapilmadi (asagida) |
 
@@ -205,6 +212,29 @@ tasidigindan fazlasini uretiyor demektir. Tikanmanin tanimi bu; ayrica RTT ya
 da pencere olcmeye gerek yok. Inis hizli (x0,75, hemen), cikis yavas (x1,15,
 5 sakin turdan sonra), taban 800 kbit. Varsayilan **acik**: saglikli agda hic
 devreye girmiyor.
+
+Cihazda olculdu: yavas okuyan bir istemciyle ag kasitli tikandi ve denetim
+dongusu beklendigi gibi davrandi.
+
+| Asama | Dusen kare | Bit hizi |
+|---|---|---|
+| Tikanma | 74 -> 86 | 8,0 -> 6,0 -> **4,5** Mbit |
+| Sakinlesme | 86 sabit | 5,17 -> 5,95 -> 6,84 -> 7,87 |
+| Toparlanma | 86 | **8,0** Mbit (hedefte tavanladi) |
+
+**Ama testin sinirini yazmak gerek:** tuketici kasitli olarak 16 KB/s
+okuyordu, oysa 8 Mbit yayin ~1 MB/s istiyor. Hicbir bit hizi indirimi boyle
+bir dar bogazi kurtaramazdi; nitekim telefon sonunda istemciyi dusurdu ve
+tikanma o yuzden bitti. Yani bu olcum **denetim dongusunun dogru calistigini**
+gosteriyor (algiliyor, geri cekiliyor, toparliyor) - "zayif ama kullanilabilir
+bir baglantiyi kurtariyor mu" sorusunu ise yanitlamiyor. Onu ancak gercek bir
+zayif WiFi gosterir.
+
+**Odak kilidi** icin durum ucu `focusLocked: true` donuyor ve akis saglikli
+kaliyor. Lensin gercekten yerinde durup durmadigini dogrulayamadim: EMUI
+uygulama gunluklerini logcat'e vermiyor ve bu fiziksel bir davranis. Kameranin
+onune farkli mesafede bir sey koyup goruntunun yeniden odaklanmadigina bakmak
+gerekiyor - elle bir bakislik is.
 
 **Tepsi simgesi yapilmadi.** Egui'nin tepsi destegi yok; `tray-icon` ya da
 `ksni` eklemek gerekiyor ve ikisi de bagimlilik agacini buyutuyor. Kazanci
@@ -243,17 +273,16 @@ Yukaridaki maddelerin cogu kapandi. Acik kalanlar ve **neden** acik kaldiklari:
 |---|---|
 | 2.1 ayna | ayar hazir; varsayilan kapali, yonu kullanima gore sen sec |
 | 2.2 kilitlenme | **gercek telefonda dogrulandi**, kapandi |
-| 2.3 dayaniklilik | olcum kosuyor (gercek telefon, ekran kapali, tuketici bagli) |
+| 2.3 dayaniklilik | **olculdu**: 30 dk, 0 dusen kare, termal kisma yok |
 | 3.1 model kapsami | uyari eklendi; daha iyi model (or. RVM) denenmedi |
 | 3.2 titreme | olculdu, is cikmadi |
 | 3.3 islemci bedeli | YUV420 ile %15,5 -> %9,7 |
 | 3.4 reduce_mean | paralellestirildi, 1,99 -> 1,35 ms |
-| 5. odak kilidi | bitti, cihazda dogrulama bekliyor |
-| 5. uyarlanabilir bit hizi | bitti, cihazda dogrulama bekliyor |
+| 5. odak kilidi | bitti; lensin yerinde durdugu elle bakilmali |
+| 5. uyarlanabilir bit hizi | bitti, cihazda dogrulandi |
 | 5. tepsi simgesi, AUR paketi | bilerek yapilmadi |
 
-Acik kalan tek olcum 2.3. Kalan tek kod isi, yeni APK'nin telefonda
-dogrulanmasi (odak kilidi + uyarlanabilir bit hizi).
+Listedeki butun maddeler kapandi.
 
 Sonraki adim icin en degerli aday **3.1**: model bas-omuz cercevesi disinda
 zayif. RVM gibi daha iyi bir model kalitesi artirir ama 1,35 ms'lik butceyi

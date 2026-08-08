@@ -353,6 +353,14 @@ For a different device or mounting, `owncam-calibrate.sh` sweeps 0/90/180/270, g
 at each, builds a contact sheet, and saves the chosen angle. Point the camera at something
 with a clear "up" — a person or a room, never the ceiling.
 
+**Endurance is measured, not assumed.** 30 minutes on the phone with the screen off,
+the app backgrounded and a real consumer attached: 48 812 frames, 0 dropped, 28.00 fps
+average, first-five-minutes 28.03 vs last-five 28.15, battery 37→39 °C. No thermal
+throttling. Steady state is **28 fps, not 30** — that is the device's rate, not a defect.
+
+A soak with no consumer measures the wrong thing: the encoder runs but the TCP path is
+never loaded. Attach a reader (`ffmpeg … -f null -`) before drawing conclusions.
+
 **The pipeline can wedge — but no longer reproduces.** Frame production once stopped at ~10
 frames while the app process stayed alive. Suspected cause: the preview EGL surface is
 vsync-locked, so `eglSwapBuffers` blocks indefinitely once the SurfaceView is destroyed

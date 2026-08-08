@@ -305,10 +305,11 @@ Rust alicisi olculebilir hicbir metrigi iyilestirmez.
 
 Faz 2 (UDP/RTP) icin de tetikleyici yok: 0 bosluk, 3 ms jitter.
 
-Geriye kalan tek gercek belirsizlik **uzun sureli dayaniklilik** — telefon bir
-saatlik toplantida isinip kare hizini dusuruyor mu, ekran kapaliyken akis
-kesiliyor mu. Bunu ancak gercek kullanim gosterir; ilk uzun toplantidan sonra
-`owncam-measure.sh 15` tekrar calistirilip yukaridaki tabloyla karsilastirilmali.
+Uzun sureli dayaniklilik de olculdu (2026-08-08, Huawei CLT-L09): ekran
+kapali, uygulama arka planda, akisi ceken bir istemci bagli, **30 dakika**
+kesintisiz. 48 812 kare, **0 dusen**, ortalama 28,00 fps; ilk bes dakika 28,03,
+son bes dakika 28,15 - yani bozulma yok. Pil sicakligi 37'den 39 dereceye
+cikti ve kare hizina hic yansimadi. **Termal kisma gorulmedi.**
 
 Yeni sey eklemek isterseniz plan bolum 8'de kullanilabilirlik maddeleri var
 (uyarlanabilir bit hizi, tepsi simgesi, AUR paketi) — hepsi konfor, hicbiri
