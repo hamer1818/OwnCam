@@ -27,7 +27,15 @@ geri alinabilir olmali.
 
 ## 2. Bilinen kusurlar
 
-### 2.1 On kamera aynasi — EKLENDI (ayar), varsayilani sen sec
+### 2.1 Yatay ayna — EKLENDI (ayar); "arıza" tespiti muhtemelen hataliydi
+
+**Onemli duzeltme:** bu maddenin dayandigi "on kamerada tisorttteki yazi ters
+okunuyor" gozlemi bana ait ve buyuk olasilikla **yanlis okumaydi** — ayni
+turden bir hata bu oturumda tekrar edildi (sandalye kafaligi tisort sanildi).
+Camera2 on kamerada gercek sahneyi veriyor; ortada duzeltilecek bir arıza
+olmayabilir.
+
+Ayar yine de yerinde: aynali/aynasiz tercihi kullanima gore degisiyor.
 
 `StreamConfig.mirror` eklendi; telefon tarafinda, `FrameRenderer.buildMatrix`
 icinde tek isaret degisikligiyle uygulaniyor, kare basina ek maliyet yok.
@@ -37,10 +45,9 @@ Emulatorde olculdu: aynali kare, aynasiz karenin yatay yansimasiyla 8,98
 ortalama farkla ortusuyor (sahnenin kendi hareket gurultusu ~5,7), dogrudan
 karsilastirmada ise 28,60. Yani ayna gercekten cikti uzayinda uygulaniyor.
 
-**Varsayilan kapali** birakildi. Camera2 on kamerada gercek sahneyi veriyor:
-uzerindeki yazi karsi tarafta dogru okunur, ama kendini izlerken ters
-hissettirir. Hangisini istedigin kullanima bagli — kutuyu isaretleyip bir
-bakista karar ver, secim kaliciya yaziliyor.
+**Varsayilan kapali.** Kural basit: karsi tarafin seni gercekte oldugu gibi
+gormesi icin **kapali**, kendini aynadaki gibi gormek icin **acik**. Sag elini
+kaldirdiginda goruntude sagda cikiyorsa ayna aciktir.
 
 Bir tuzak vardi, dusuldu: donus 0 ve onizleme kapaliyken GL katmani tamamen
 atlaniyordu (kamera dogrudan kodlayiciya). Ayna da GL'de uygulandigi icin o
@@ -63,10 +70,20 @@ Emulatorde (Pixel 10 Pro XL) sinandi — uc asama da 30 fps'te kilitli ilerledi:
 
 12 dakikalik surekli kosuda 0 dusen kare, OwnCam'e ait tek bir EGL hatasi yok.
 
-**Ama bu kanit degil, delil.** Emulatorun EGL/SurfaceView gerceklemesi gercek
-telefonunkiyle ayni degil ve ozgun gozlem gercek cihazdaydi. Nihai soz hâlâ
-telefonda: bir kez uzun sureli arka planda birakip
-`owncam-status.sh` ile sayaclara bak.
+**Sonra gercek telefonda (Huawei CLT-L09, Android 10) tekrarlandi ve gecti:**
+
+| Durum | Kare hizi |
+|---|---|
+| On planda (`mCurrentFocus` = OwnCam) | 29,3 fps |
+| Arka planda (odak launcher'a gecti) | 28,3 fps |
+| Ekran kapali (`mWakefulness=Asleep`) | 28,1 fps |
+
+Uc asama da kilitli ilerledi, dusen kare 0. Gecislerin gercekten oldugu
+`dumpsys window` / `dumpsys power` ile **dogrulandi** - ilk denemede adb
+baglantisi sessizce dusmus ve tuslar telefona hic gitmemisti, sayaclarin
+ilerlemesi de o yuzden yaniltici olmustu.
+
+Madde kapandi. `EglCore.setSwapInterval(0)` calisiyor.
 
 ### 2.3 Uzun sureli dayaniklilik — emulatorde 14 dk temiz, telefonda bekliyor
 

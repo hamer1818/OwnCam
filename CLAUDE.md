@@ -359,10 +359,13 @@ vsync-locked, so `eglSwapBuffers` blocks indefinitely once the SurfaceView is de
 (app backgrounded / screen off), stalling the GL thread and starving the encoder.
 `EglCore.setSwapInterval(0)` was added for this.
 
-Retested on the **emulator** (Pixel 10 Pro XL): foreground, HOME-backgrounded, and
-screen-off all held 30 fps with all three stages advancing in lockstep, and a 14-minute
-continuous run finished at 25 828 frames with 0 dropped and no OwnCam EGL errors.
+Retested **on the phone** (CLT-L09, Android 10) and it holds: 29.3 fps in the foreground,
+28.3 backgrounded, 28.1 with the screen off, all three stages in lockstep, 0 dropped.
 
-That is evidence, not proof: the emulator's EGL/SurfaceView implementation is not the
-phone's, and the original observation was on the physical device. If it ever recurs, the
-stage counters (`cameraFrames` → `glDraws` → `encoderOutputs` → `framesSent`) localize it.
+Verify the state transitions actually happened (`dumpsys window` for focus, `dumpsys power`
+for `mWakefulness`) — the first attempt looked like a pass but the adb connection had
+silently dropped, so the keyevents never reached the phone and the app never left the
+foreground. Advancing counters proved nothing.
+
+If it ever recurs, the stage counters (`cameraFrames` → `glDraws` → `encoderOutputs` →
+`framesSent`) localize it.
