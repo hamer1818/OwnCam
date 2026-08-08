@@ -490,6 +490,71 @@ mod tests {
         );
     }
 
+    /// Basit, tohumlu gurultu ureteci - `rand` bagimliligi eklemeye degmez.
+    fn xorshift(state: &mut u32) -> f32 {
+        *state ^= *state << 13;
+        *state ^= *state >> 17;
+        *state ^= *state << 5;
+        // 0..1 araligina indir
+        (*state >> 8) as f32 / (1u32 << 24) as f32
+    }
+
+    /// **Olcum**: maske ardisik karelerde ne kadar titriyor?
+    ///
+    /// Gercek bir video dizisi yerine ayni kareye kare basina bagimsiz
+    /// gurultu ekleniyor. Titremenin fiziksel sebebi zaten bu: sabit sahnede
+    /// bile algilayici gurultusu her kareyi biraz degistiriyor ve ag her
+    /// kareyi bagimsiz cozuyor. Gercek bir dizide buna hareket de eklenir,
+    /// yani bu **alt sinir**.
+    ///
+    /// ```text
+    /// cargo test --release maske_titremesi -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "olcum; elle calistirilir"]
+    fn maske_titremesi() {
+        let Ok(seg) = Segmenter::new() else {
+            eprintln!("ekran karti yok");
+            return;
+        };
+        let base = nchw();
+        // Telefon kamerasinda iyi isikta tipik gurultu ~1-3 seviye (255 uzerinden).
+        for sigma_level in [1.0f32, 3.0] {
+            let sigma = sigma_level / 255.0;
+            let mut state = 0x2545_F491u32;
+            let mut previous: Option<Vec<f32>> = None;
+            let (mut sum_delta, mut sum_flip, mut frames) = (0.0f64, 0.0f64, 0u32);
+
+            for _ in 0..20 {
+                let noisy: Vec<f32> = base
+                    .iter()
+                    .map(|v| (v + (xorshift(&mut state) - 0.5) * 2.0 * sigma).clamp(0.0, 1.0))
+                    .collect();
+                let mask = seg.mask(&noisy).expect("maske");
+                if let Some(prev) = &previous {
+                    let mut delta = 0.0f64;
+                    let mut flip = 0u32;
+                    for (a, b) in mask.iter().zip(prev.iter()) {
+                        delta += (a - b).abs() as f64;
+                        if (*a > 0.5) != (*b > 0.5) {
+                            flip += 1;
+                        }
+                    }
+                    sum_delta += delta / mask.len() as f64;
+                    sum_flip += flip as f64 / mask.len() as f64;
+                    frames += 1;
+                }
+                previous = Some(mask);
+            }
+            eprintln!(
+                "gurultu +-{sigma_level:.0}/255 -> ardisik maske farki ort {:.5}, \
+                 esik atlayan piksel orani {:.5}",
+                sum_delta / frames as f64,
+                sum_flip / frames as f64,
+            );
+        }
+    }
+
     #[test]
     fn maske_referansla_ortusuyor() {
         let seg = match Segmenter::new() {

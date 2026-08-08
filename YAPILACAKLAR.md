@@ -90,14 +90,24 @@ Secenekler, ucu de denenmedi:
 - Daha buyuk bir model (or. RVM). Kalite artar, 1,99 ms'lik butce buyur —
   once olc, sonra karar ver.
 
-### 3.2 Zamansal kararlilik olculmedi
+### 3.2 Zamansal kararlilik — OLCULDU, is cikmadi
 
-Maske kare kare bagimsiz uretiliyor; ardisik karelerde titreme olup olmadigi
-**olculmedi**. Tek karelik testler bunu gostermez.
+Maske kare kare bagimsiz uretiliyor. Titreyip titremedigi olculdu
+(`cargo test --release maske_titremesi -- --ignored --nocapture`): ayni kareye
+kare basina bagimsiz algilayici gurultusu eklenip ardisik maskeler
+karsilastirildi.
 
-Olcum: sabit sahnede 100 kare topla, ardisik maskelerin farkinin ortalamasina
-bak. Titreme varsa cozumu ucuz — onceki maskeyle ussel ortalama (bir satir
-shader), ama gecikmeye 1 kare ekler. Olcmeden ekleme.
+| Gurultu | Ardisik maske farki (ort) | 0,5 esigini atlayan piksel |
+|---|---|---|
+| ±1/255 | 0,00031 | %0,017 |
+| ±3/255 | 0,00079 | %0,055 |
+
+%0,055, 256x256'lik maskede ~36 piksel demek. **Gozle gorulur titreme yok,
+zamansal yumusatma eklenmedi** — eklemek gecikmeye bir kare bindirirdi ve
+karsiliginda olculebilir bir kazanc yok.
+
+Not: bu bir **alt sinir**. Gercek bir dizide harekete bagli degisim de olur,
+ama o istenen degisim; titreme degil.
 
 ### 3.3 Efektin islemci bedeli gereginden yuksek
 
