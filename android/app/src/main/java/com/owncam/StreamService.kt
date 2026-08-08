@@ -222,6 +222,7 @@ class StreamService : Service(), CameraEncoder.Listener {
                     preview = params["preview"]?.let { it == "1" } ?: config.preview,
                     autoRotate = params["auto"]?.let { it == "1" } ?: config.autoRotate,
                     frameMode = params["mode"]?.let { FrameMode.from(it) } ?: config.frameMode,
+                    mirror = params["mirror"]?.let { it == "1" } ?: config.mirror,
                     lockExposure = params["exposure"]?.let { it == "1" } ?: config.lockExposure
                 ).let {
                     if (params["width"] != null || params["height"] != null) {
@@ -366,6 +367,7 @@ class StreamService : Service(), CameraEncoder.Listener {
           "sensorOrientation": ${cam?.sensorAngle ?: 0},
           "imageRotation": ${config.imageRotation},
           "preview": ${config.preview},
+          "mirror": ${config.mirror},
           "autoRotate": ${config.autoRotate},
           "deviceOrientation": $deviceOrientation,
           "frameMode": ${q(config.frameMode.key)},

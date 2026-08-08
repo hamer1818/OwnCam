@@ -54,6 +54,10 @@ class FrameRenderer(
     @Volatile
     var crop: Boolean = false
 
+    /** true ise kare yatayda ters cevrilir (ayna). Bkz. `StreamConfig.mirror`. */
+    @Volatile
+    var mirror: Boolean = false
+
     private val texMatrix = FloatArray(16)
     private val mvpMatrix = FloatArray(16)
 
@@ -257,6 +261,14 @@ class FrameRenderer(
         val dstAspect = dstWidth.toFloat() / dstHeight
 
         Matrix.setIdentityM(mvpMatrix, 0)
+
+        // Ayna **once** yaziliyor ki cikti uzayinda, yani donusten sonra
+        // uygulansin: `scaleM` sagdan carptigi icin kodda ilk gelen, kosede
+        // en sona kalan islem oluyor. Donusten sonra cevirmek ile once
+        // cevirmek ayni sey degil - 90/270'te sonuc dikeyde ters cikardi.
+        if (mirror) {
+            Matrix.scaleM(mvpMatrix, 0, -1f, 1f, 1f)
+        }
 
         if (fitOutputFrame) {
             // Onizleme yuzeyi: tum kareyi ekrana sigdir (burada bant serbest).

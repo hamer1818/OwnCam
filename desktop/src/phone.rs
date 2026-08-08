@@ -27,6 +27,7 @@ pub struct Status {
     pub image_rotation: i32,
     pub preview: bool,
     pub auto_rotate: bool,
+    pub mirror: bool,
     /// Telefonun fiziksel yonu; karenin **sekli** bundan geliyor.
     pub device_orientation: i32,
     pub frame_mode: Option<String>,

@@ -96,6 +96,17 @@ data class StreamConfig(
     val autoRotate: Boolean = true,
     /** Kadrajin kareye nasil oturacagi; bkz. [FrameMode]. */
     val frameMode: FrameMode = FrameMode.FILL,
+    /**
+     * Goruntuyu yatayda ters cevir.
+     *
+     * Camera2 on kamerada **aynalanmamis** kare veriyor: lensin gordugu
+     * gercek sahne. Kendini izlerken bu ters hissettiriyor (aynaya alisigiz),
+     * ama karsi tarafa giden goruntude uzerindeki yazi dogru okunuyor.
+     *
+     * Hangisinin dogru oldugu kullanima gore degisiyor, o yuzden ayar.
+     * Varsayilan **kapali**: yayina giden kare gercege sadik kalsin.
+     */
+    val mirror: Boolean = false,
     val port: Int = DEFAULT_PORT
 ) : Serializable {
 
@@ -123,7 +134,8 @@ data class StreamConfig(
                 imageRotation = p.getInt("imageRotation", d.imageRotation),
                 preview = p.getBoolean("preview", d.preview),
                 autoRotate = p.getBoolean("autoRotate", d.autoRotate),
-                frameMode = FrameMode.from(p.getString("frameMode", d.frameMode.key))
+                frameMode = FrameMode.from(p.getString("frameMode", d.frameMode.key)),
+                mirror = p.getBoolean("mirror", d.mirror)
             )
         }
 
@@ -139,6 +151,7 @@ data class StreamConfig(
                 .putInt("imageRotation", config.imageRotation)
                 .putBoolean("preview", config.preview)
                 .putBoolean("autoRotate", config.autoRotate)
+                .putBoolean("mirror", config.mirror)
                 .putString("frameMode", config.frameMode.key)
                 .apply()
         }

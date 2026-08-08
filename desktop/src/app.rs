@@ -154,6 +154,8 @@ pub struct Settings {
     pub front: bool,
     pub exposure_lock: bool,
     pub phone_preview: bool,
+    /// Goruntuyu yatayda ters cevir. Telefon tarafinda, GL matrisinde.
+    pub mirror: bool,
 }
 
 impl Default for Settings {
@@ -167,6 +169,7 @@ impl Default for Settings {
             front: true,
             exposure_lock: false,
             phone_preview: true,
+            mirror: false,
         }
     }
 }
@@ -183,6 +186,7 @@ impl Settings {
             ("front", bit(self.front)),
             ("exposure", bit(self.exposure_lock)),
             ("preview", bit(self.phone_preview)),
+            ("mirror", bit(self.mirror)),
         ];
         // Otomatikken donusu gondermiyoruz: telefon zaten kendi fiziksel
         // yonunden belirliyor, gonderirsek bir sonraki yon okumasi hemen
@@ -303,6 +307,7 @@ impl OwnCamApp {
         self.settings.front = status.camera.as_deref() == Some("front");
         self.settings.exposure_lock = status.exposure_locked;
         self.settings.phone_preview = status.preview;
+        self.settings.mirror = status.mirror;
         self.applying = false;
     }
 
@@ -610,6 +615,10 @@ impl OwnCamApp {
         ui.checkbox(&mut self.settings.front, "On kamera");
         ui.checkbox(&mut self.settings.exposure_lock, "Pozlamayi kilitle");
         ui.checkbox(&mut self.settings.phone_preview, "Telefonda onizleme");
+        ui.checkbox(&mut self.settings.mirror, "Aynala (yatayda ters cevir)")
+            .on_hover_text(
+                "On kamera gercek sahneyi veriyor: uzerindeki yazi karsi tarafta                  dogru okunur ama kendini izlerken ters hissettirir.",
+            );
 
         if self.settings != before && !self.applying {
             self.apply_settings();
@@ -712,6 +721,21 @@ mod tests {
         let rotation = params.iter().find(|(k, _)| *k == "rotation").unwrap();
         assert_eq!(rotation.1, "270");
         assert!(params.iter().any(|(k, v)| *k == "auto" && v == "0"));
+    }
+
+    /// Ayna ayari telefona gonderilmeli ve `mirror` anahtariyla gitmeli.
+    #[test]
+    fn ayna_ayari_gonderilir() {
+        let kapali = Settings::default().to_params();
+        assert_eq!(
+            kapali.iter().find(|(k, _)| *k == "mirror").map(|(_, v)| v.as_str()),
+            Some("0")
+        );
+        let acik = Settings { mirror: true, ..Default::default() }.to_params();
+        assert_eq!(
+            acik.iter().find(|(k, _)| *k == "mirror").map(|(_, v)| v.as_str()),
+            Some("1")
+        );
     }
 
     /// Kapsam uyarisi yalnizca gercekten dusukken cikmali.

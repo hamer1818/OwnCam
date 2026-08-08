@@ -27,21 +27,24 @@ geri alinabilir olmali.
 
 ## 2. Bilinen kusurlar
 
-### 2.1 On kamera goruntusu ayna degil
+### 2.1 On kamera aynasi — EKLENDI (ayar), varsayilani sen sec
 
-Telefonun on kamerasi kullanilirken goruntu **aynalanmiyor**. Uzerindeki
-yazi ters okunuyor. Kodun hicbir yerinde ayna islemi yok — `mirror` ya da
-`ayna` gecen tek satir bulunmuyor.
+`StreamConfig.mirror` eklendi; telefon tarafinda, `FrameRenderer.buildMatrix`
+icinde tek isaret degisikligiyle uygulaniyor, kare basina ek maliyet yok.
+Masaustunde "Aynala" kutusu, uctan uca `/config?mirror=1`.
 
-Dogru davranis ayrik: kendini izlerken ayna (dogal), karsi tarafa giderken
-duz. Bu yuzden **ayar olmali, sabit deger degil.**
+Emulatorde olculdu: aynali kare, aynasiz karenin yatay yansimasiyla 8,98
+ortalama farkla ortusuyor (sahnenin kendi hareket gurultusu ~5,7), dogrudan
+karsilastirmada ise 28,60. Yani ayna gercekten cikti uzayinda uygulaniyor.
 
-Ucuz cozum: `FrameRenderer.buildMatrix` icinde X eksenini ters cevirmek —
-GL matrisinde tek isaret degisikligi, kare basina ek maliyet sifir.
-Alternatif olarak masaustunde kompozit shader'inda da yapilabilir ama o zaman
-efekt kapaliyken calismaz; **telefon tarafi dogru yer.**
+**Varsayilan kapali** birakildi. Camera2 on kamerada gercek sahneyi veriyor:
+uzerindeki yazi karsi tarafta dogru okunur, ama kendini izlerken ters
+hissettirir. Hangisini istedigin kullanima bagli — kutuyu isaretleyip bir
+bakista karar ver, secim kaliciya yaziliyor.
 
-Dogrulama: `owncam-snapshot.sh` ile kare alip uzerinde yazi olan bir sey tut.
+Bir tuzak vardi, dusuldu: donus 0 ve onizleme kapaliyken GL katmani tamamen
+atlaniyordu (kamera dogrudan kodlayiciya). Ayna da GL'de uygulandigi icin o
+kisayol artik `!config.mirror` de ariyor.
 
 ### 2.2 Boru hatti kilitlenebiliyor — duzeltme cihazda dogrulanmadi
 

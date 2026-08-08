@@ -117,7 +117,9 @@ class CameraEncoder(
         // onizleme icin var; ikisi de yoksa araya girmesinin tek etkisi fazladan
         // bir kirilma noktasi olmak. GL oncesi surum bu yolda 1080p30'da
         // sorunsuz calisiyordu, varsayilan yapilandirma oraya geri donuyor.
-        if (rotation == 0 && !config.preview) {
+        // GL yalnizca yapacak isi yoksa atlanabilir. Ayna da GL'de
+        // uygulaniyor, dolayisiyla acikken bu kisayol kullanilamaz.
+        if (rotation == 0 && !config.preview && !config.mirror) {
             Log.i(TAG, "GL atlandi: kamera dogrudan kodlayiciya")
         } else {
             try {
@@ -125,6 +127,7 @@ class CameraEncoder(
                 renderer = FrameRenderer(surface, captureSize, frameSize).also {
                     it.rotation = rotation
                     it.crop = config.frameMode == FrameMode.FILL
+                    it.mirror = config.mirror
                 }
             } catch (e: Exception) {
                 fail("GL katmani kurulamadi: ${e.message}")
