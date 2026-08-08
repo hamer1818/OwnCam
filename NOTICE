@@ -1,0 +1,17 @@
+OwnCam ucuncu taraf bilesenleri
+================================
+
+desktop/assets/selfie_segmentation.onnx
+---------------------------------------
+MediaPipe Selfie Segmentation modeli.
+
+  Telif hakki: Google LLC
+  Lisans:      Apache License 2.0
+  Kaynak:      https://huggingface.co/onnx-community/mediapipe_selfie_segmentation
+               (onnx/model.onnx)
+
+Apache-2.0 lisansinin tam metni:
+  https://www.apache.org/licenses/LICENSE-2.0
+
+Model dosyasi degistirilmeden, indirildigi haliyle depoya eklenmistir.
+Projenin geri kalani MIT lisansi altindadir (bkz. LICENSE).

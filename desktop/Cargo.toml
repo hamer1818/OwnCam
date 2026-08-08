@@ -1,0 +1,32 @@
+[package]
+name = "owncam"
+version = "0.1.0"
+edition = "2021"
+description = "Telefonu webcam'e ceviren OwnCam masaustu uygulamasi"
+license = "MIT"
+
+[dependencies]
+eframe = { version = "0.29", default-features = false, features = [
+    "glow",          # OpenGL: wgpu'dan daha kucuk ikili, bu is icin fazlasiyla yeterli
+    "default_fonts",
+] }
+egui = "0.29"
+mdns-sd = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2", default-features = false }
+
+# Arka plan silme: segmentasyon agi kendi WGSL cekirdeklerimizle ekran
+# kartinda kosuyor. Hazir cikarim kutuphaneleri ya islemcide kaliyor ya da
+# devasa - `tract` bu modeli 32 ms'de cozuyor (30 fps butcesi 33 ms) ve
+# ikiliye 35 MB bindiriyor.
+wgpu = "23"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = true          # ikiliyi kucultur
+codegen-units = 1
+strip = true
+panic = "abort"     # unwind tablolari ~%10 yer kapliyor

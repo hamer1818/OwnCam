@@ -1,0 +1,20 @@
+[Unit]
+Description=OwnCam - telefon kamerasini /dev/video11'e aktarir
+After=network-online.target avahi-daemon.service
+Wants=network-online.target
+# Telefon bulunamadiginda script kendi icinde bekliyor; systemd'nin
+# "cok hizli yeniden basladi" korumasina takilmasin diye sinir kapali.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/owncam-receive.sh
+Restart=always
+RestartSec=2
+Environment=OWNCAM_DEVICE=/dev/video11
+Environment=OWNCAM_PORT=5299
+# Telefondaki kare hizi ile ayni olmali.
+Environment=OWNCAM_FPS=30
+
+[Install]
+WantedBy=default.target

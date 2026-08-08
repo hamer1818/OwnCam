@@ -1,0 +1,24 @@
+# Rust
+desktop/target/
+
+# Android
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties      # makineye ozel SDK yolu
+*.apk
+*.iml
+.cxx/
+
+# Python (eski GTK surumunden kalma)
+__pycache__/
+*.pyc
+
+# Masaustu ortami
+.directory
+.idea/
+.vscode/
+
+# Gecici
+*.rgba
+*.log
