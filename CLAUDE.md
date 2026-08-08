@@ -32,7 +32,7 @@ Desktop app — Rust + egui, **Linux only**, supersedes `linux/owncam-desktop.py
 ```bash
 cd desktop
 cargo build --release          # target/release/owncam, 10.4 MB
-cargo test                     # 45 tests
+cargo test                     # 52 tests
 cargo test seg::plan           # one module
 cargo test olcek_buyutme       # one test by name substring
 ```
@@ -155,6 +155,20 @@ distinguishable background. On an extreme close-up (face filling the frame,
 flat white wall behind) it returns a near-empty mask. That is the model's
 limit, not a bug; do not go looking for one.
 
+The composite writes **YUV420 directly**, not RGBA: readback drops from 4 to 1.5 bytes per
+pixel and the second ffmpeg passes bytes through instead of converting. Measured A/B on the
+same source: 15.5% → 9.7% total CPU. Each thread writes a whole `u32` so byte-level
+read-modify-write cannot race, which requires plane lengths divisible by 4; `output_format`
+falls back to RGBA when a frame size would break that.
+
+There is no extra storage binding for it — the composite already uses the 8-buffer limit, so
+YUV is written past the RGBA region of the same output buffer. The mask-coverage reduction
+does the same trick, writing into a small scratch area at the end of the arena.
+
+Coverage (the mask's mean) reaches the UI so it can say "kisi bulunamadi" instead of silently
+producing a broken-looking effect. Measured: 0.56 head-and-shoulders, 0.0000 flat wall,
+0.0013 on the extreme close-up; the warning threshold is 0.02.
+
 Effects on/off switch the pipeline shape, so the receiver restarts; every
 other effect setting applies live.
 
@@ -250,6 +264,19 @@ The rotation and the device orientation are **two separate inputs** and both are
 rotation orients the content, device orientation decides the frame's shape. Collapsing them
 was the bug that produced portrait video in a landscape frame.
 
+`config.mirror` flips the image horizontally, also in the GL matrix. It is written into the
+matrix **first** so it lands in output space (after the rotation) — `scaleM` post-multiplies,
+so the first call in code is the last operation applied. Mirroring before the rotation gives
+a vertically flipped result at 90/270.
+
+One trap, already sprung once: the GL layer is skipped entirely when rotation is 0 and
+preview is off (camera feeds the encoder directly). Mirroring lives in GL, so that shortcut
+also has to check `!config.mirror`.
+
+The default is **off**: Camera2 hands back the true scene, so text on a shirt reads correctly
+for the viewer even though it feels backwards to the person on camera. Which one is wanted
+depends on use, so it is a setting rather than a constant.
+
 There is exactly one rotation knob, `config.imageRotation`, and it is persisted. An earlier
 design added a second `manualOffset` on top of it; the sum was untrackable and the three
 status fields (`imageRotation` / `manualOffset` / `appliedRotation`) disagreed with each
@@ -326,10 +353,16 @@ For a different device or mounting, `owncam-calibrate.sh` sweeps 0/90/180/270, g
 at each, builds a contact sheet, and saves the chosen angle. Point the camera at something
 with a clear "up" — a person or a room, never the ceiling.
 
-**The pipeline can wedge.** Frame production has stopped at ~10 frames while the app process
-stayed alive (status endpoint still responding). Suspected cause: the preview EGL surface is
+**The pipeline can wedge — but no longer reproduces.** Frame production once stopped at ~10
+frames while the app process stayed alive. Suspected cause: the preview EGL surface is
 vsync-locked, so `eglSwapBuffers` blocks indefinitely once the SurfaceView is destroyed
-(app backgrounded / screen off), which stalls the GL thread and starves the encoder.
-`EglCore.setSwapInterval(0)` was added for this but is **unverified on device**. The stage
-counters will confirm or refute it. Workaround while unverified: keep the app in the
-foreground.
+(app backgrounded / screen off), stalling the GL thread and starving the encoder.
+`EglCore.setSwapInterval(0)` was added for this.
+
+Retested on the **emulator** (Pixel 10 Pro XL): foreground, HOME-backgrounded, and
+screen-off all held 30 fps with all three stages advancing in lockstep, and a 14-minute
+continuous run finished at 25 828 frames with 0 dropped and no OwnCam EGL errors.
+
+That is evidence, not proof: the emulator's EGL/SurfaceView implementation is not the
+phone's, and the original observation was on the physical device. If it ever recurs, the
+stage counters (`cameraFrames` → `glDraws` → `encoderOutputs` → `framesSent`) localize it.

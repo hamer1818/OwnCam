@@ -68,7 +68,11 @@ telefonunkiyle ayni degil ve ozgun gozlem gercek cihazdaydi. Nihai soz hâlâ
 telefonda: bir kez uzun sureli arka planda birakip
 `owncam-status.sh` ile sayaclara bak.
 
-### 2.3 Uzun sureli dayaniklilik olculmedi
+### 2.3 Uzun sureli dayaniklilik — emulatorde 14 dk temiz, telefonda bekliyor
+
+Emulatorde 14 dakika kesintisiz: 25 828 kare, ortalama 29,98 fps, **0 dusen
+kare**, bozulma yok. Ama emulator isinmiyor ve termal kisma yapmiyor; asagidaki
+soru hâlâ gecerli ve yaniti yalnizca gercek telefon verebilir.
 
 `README.md` "Neden burada duruyoruz" bolumunun kendi tespiti: geriye kalan tek
 gercek belirsizlik uzun sureli davranis. Telefon bir saatlik toplantida isinip
@@ -203,10 +207,18 @@ onermeden once gerekcenin degistigini goster.
 
 ---
 
-## Sirasi gelince nereden baslamali
+## Geriye ne kaldi
 
-1. `git init` (madde 1) — geri kalani geri alinabilir yapar.
-2. Ayna ayari (2.1) — kucuk, gorunur, kullanicinin isine yariyor.
-3. Kilitlenme dogrulamasi (2.2) — is degil, gozlem; ama cevabi mimariyi
-   etkileyebilir.
-4. Uzun sureli olcum (2.3) ve maske titremesi (3.2) — ikisi de once olcum.
+Yukaridaki maddelerin cogu kapandi. Acik kalanlar ve **neden** acik kaldiklari:
+
+| Madde | Durum | Neden bekliyor |
+|---|---|---|
+| 2.2 kilitlenme | emulatorde gecti | Gercek cihazda bir kez uzun sureli arka planda dogrulanmali |
+| 2.3 dayaniklilik | emulatorde 14 dk temiz | Emulator isinmiyor; termal kisma yalnizca telefonda gorulur |
+| 2.1 ayna varsayilani | ayar hazir, kapali | Hangi yonun dogru oldugu kullanima bagli; bir bakisla sen sec |
+| 3.1 model kapsami | uyari eklendi | Daha iyi model (or. RVM) denenmedi; once butce olculmeli |
+| 5. odak kilidi | yok | Konfor |
+| 5. uyarlanabilir bit hizi | yok | Konfor, ama digerlerinden degerli |
+| 5. tepsi simgesi, AUR paketi | yok | Konfor |
+
+Telefon gerektiren iki madde (2.2, 2.3) disinda acil is yok.
