@@ -194,14 +194,25 @@ Kodda dogrulanan durum:
 |---|---|
 | Ayar ekrani (cozunurluk, bit hizi, on/arka kamera) | **bitti** — masaustu uygulamasinda |
 | Otomatik pozlama kilidi | **bitti** — `exposureLocked` |
-| Odak kilidi | yok |
-| Uyarlanabilir bit hizi | yok — bit hizi ayarlanabiliyor ama WiFi zayiflayinca kendiliginden dusmuyor |
-| Tepsi simgesi | yok |
-| Paketleme (AUR PKGBUILD) | yok |
+| Odak kilidi | **bitti** — `lockFocus`, AF tetigi ile kilit |
+| Uyarlanabilir bit hizi | **bitti** — dusen kare sayaci sinyal, x0,75 in / x1,15 cik |
+| Tepsi simgesi | yapilmadi (asagida) |
+| Paketleme (AUR PKGBUILD) | yapilmadi (asagida) |
 
-Hicbiri performansi etkilemiyor, hepsi konfor. Uyarlanabilir bit hizi
-digerlerinden daha degerli: WiFi zayifladiginda su an kare atiliyor, oysa
-kaliteyi dusurmek daha az rahatsiz edici olurdu.
+**Uyarlanabilir bit hizi** nasil calisiyor: gonderim kuyrugu iki kare tutup
+dolunca en eskisini atiyor, yani dusen kare sayaci artiyorsa kodlayici agin
+tasidigindan fazlasini uretiyor demektir. Tikanmanin tanimi bu; ayrica RTT ya
+da pencere olcmeye gerek yok. Inis hizli (x0,75, hemen), cikis yavas (x1,15,
+5 sakin turdan sonra), taban 800 kbit. Varsayilan **acik**: saglikli agda hic
+devreye girmiyor.
+
+**Tepsi simgesi yapilmadi.** Egui'nin tepsi destegi yok; `tray-icon` ya da
+`ksni` eklemek gerekiyor ve ikisi de bagimlilik agacini buyutuyor. Kazanci
+konfor, bedeli "hafif ikili" sartindan taviz — gerekce zayif.
+
+**AUR paketi yapilmadi.** Once bir surum etiketi ve yayin arsivi gerekiyor;
+ayrica AUR'a yuklemek senin hesabinla yapilacak bir is. Depo yeni public oldu,
+dogal sirasi bundan sonra.
 
 ---
 
@@ -228,14 +239,22 @@ onermeden once gerekcenin degistigini goster.
 
 Yukaridaki maddelerin cogu kapandi. Acik kalanlar ve **neden** acik kaldiklari:
 
-| Madde | Durum | Neden bekliyor |
-|---|---|---|
-| 2.2 kilitlenme | emulatorde gecti | Gercek cihazda bir kez uzun sureli arka planda dogrulanmali |
-| 2.3 dayaniklilik | emulatorde 14 dk temiz | Emulator isinmiyor; termal kisma yalnizca telefonda gorulur |
-| 2.1 ayna varsayilani | ayar hazir, kapali | Hangi yonun dogru oldugu kullanima bagli; bir bakisla sen sec |
-| 3.1 model kapsami | uyari eklendi | Daha iyi model (or. RVM) denenmedi; once butce olculmeli |
-| 5. odak kilidi | yok | Konfor |
-| 5. uyarlanabilir bit hizi | yok | Konfor, ama digerlerinden degerli |
-| 5. tepsi simgesi, AUR paketi | yok | Konfor |
+| Madde | Durum |
+|---|---|
+| 2.1 ayna | ayar hazir; varsayilan kapali, yonu kullanima gore sen sec |
+| 2.2 kilitlenme | **gercek telefonda dogrulandi**, kapandi |
+| 2.3 dayaniklilik | olcum kosuyor (gercek telefon, ekran kapali, tuketici bagli) |
+| 3.1 model kapsami | uyari eklendi; daha iyi model (or. RVM) denenmedi |
+| 3.2 titreme | olculdu, is cikmadi |
+| 3.3 islemci bedeli | YUV420 ile %15,5 -> %9,7 |
+| 3.4 reduce_mean | paralellestirildi, 1,99 -> 1,35 ms |
+| 5. odak kilidi | bitti, cihazda dogrulama bekliyor |
+| 5. uyarlanabilir bit hizi | bitti, cihazda dogrulama bekliyor |
+| 5. tepsi simgesi, AUR paketi | bilerek yapilmadi |
 
-Telefon gerektiren iki madde (2.2, 2.3) disinda acil is yok.
+Acik kalan tek olcum 2.3. Kalan tek kod isi, yeni APK'nin telefonda
+dogrulanmasi (odak kilidi + uyarlanabilir bit hizi).
+
+Sonraki adim icin en degerli aday **3.1**: model bas-omuz cercevesi disinda
+zayif. RVM gibi daha iyi bir model kalitesi artirir ama 1,35 ms'lik butceyi
+buyutur — once olc, sonra karar ver.
