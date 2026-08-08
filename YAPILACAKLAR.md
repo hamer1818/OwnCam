@@ -185,10 +185,9 @@ Olcum: **1,99 -> 1,35 ms/kare** (%32). Maske referansla birebir kaldi.
 - **Kok `.gitignore` yok.** En az: `desktop/target/`, `linux/__pycache__/`,
   `android/build/`, `android/.gradle/`, `android/local.properties`.
   (`desktop/` ve `android/` kendi `.gitignore`larina sahip, kok dizin degil.)
-- **`linux/__pycache__/owncam-desktop.cpython-314.pyc`** — derlenmis Python
-  cikitisi, depoda isi yok.
-- **`linux/owncam-desktop.py`** artik kullanilmiyor; yerini Rust uygulamasi
-  aldi. Silinsin mi kalsin mi **senin kararin** — silmedim.
+- ~~`linux/__pycache__/...pyc`~~ — silindi.
+- ~~`linux/owncam-desktop.py`~~ — silindi. Yerini Rust uygulamasi aldi;
+  `install.sh` de artik onu kurmuyor.
 - `.directory` (KDE klasor ayari) da depoya ait degil.
 
 ---

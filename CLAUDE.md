@@ -26,8 +26,8 @@ attached in this environment, so installing requires the user (or `adb` over WiF
 enable it). AGP 9 provides Kotlin support natively — do **not** add the
 `org.jetbrains.kotlin.android` plugin, the build fails if you do.
 
-Desktop app — Rust + egui, **Linux only**, supersedes `linux/owncam-desktop.py`
-(the old GTK/Python UI, still in the tree but no longer the app):
+Desktop app — Rust + egui, **Linux only**. It replaced a GTK/Python UI that has since
+been deleted; if you find references to `owncam-desktop.py`, they are stale.
 
 ```bash
 cd desktop

@@ -11,8 +11,7 @@ UNIT="$HOME/.config/systemd/user"
 mkdir -p "$BIN" "$UNIT"
 
 for f in owncam-receive.sh owncam-discover.sh owncam-measure.sh \
-         owncam-status.sh owncam-snapshot.sh owncam-calibrate.sh \
-         owncam-desktop.py; do
+         owncam-status.sh owncam-snapshot.sh owncam-calibrate.sh; do
     install -m 755 "$SRC/$f" "$BIN/$f"
     echo "kuruldu: $BIN/$f"
 done
