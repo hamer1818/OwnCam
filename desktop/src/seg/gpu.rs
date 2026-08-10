@@ -28,7 +28,7 @@ pub fn input_shape() -> Shape {
         .and_then(|v| v.parse::<usize>().ok())
         // 32'nin kati olmali: ag girdiyi bes kez yariya bolup geri buyutuyor.
         .map(|v| (v / 32).clamp(4, 32) * 32)
-        .unwrap_or(plan::REFERENCE_INPUT);
+        .unwrap_or(INPUT.w);
     Shape { c: 3, h: n, w: n }
 }
 

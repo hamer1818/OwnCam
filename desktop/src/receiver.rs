@@ -208,6 +208,8 @@ fn run(
 
         // Efekt yolunda sanal kameraya yazan ikinci ffmpeg; kapali yolda
         // cozucu zaten dogrudan yaziyor.
+        // Yazicinin acildigi bicim; isleyicinin urettigiyle birebir tutmali.
+        let writer_format = output_format(config.frame.0, config.frame.1);
         let mut writer = if with_effects {
             match spawn_writer(&config, sink.as_deref()) {
                 Ok(w) => w,
@@ -270,6 +272,19 @@ fn run(
                     };
                     if done.coverage != effects.lock().unwrap().coverage {
                         effects.lock().unwrap().coverage = done.coverage;
+                    }
+                    // Yazici belirli bir piksel bicimiyle acildi. Isleyici
+                    // baska bir bicim uretirse bayt sayisi tutsa bile goruntu
+                    // bozulur - ve sessizce bozulur. Yuksek sesle dur.
+                    if done.format != writer_format {
+                        set_state(
+                            &state,
+                            format!(
+                                "cikti bicimi degisti ({:?} -> {:?})",
+                                writer_format, done.format
+                            ),
+                        );
+                        break;
                     }
                     if let Some(stdin) = writer.as_mut().and_then(|w| w.stdin.as_mut()) {
                         // Sanal kamera okumayi birakirsa yazma hata verir;

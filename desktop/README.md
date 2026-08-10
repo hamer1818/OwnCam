@@ -11,7 +11,12 @@ cargo test                   # 45 test
 ```
 
 Ortam degiskenleri: `OWNCAM_HOST`, `OWNCAM_DEVICE`, `OWNCAM_EFFECT`
-(`bulanik` / `renk` / `foto`), `OWNCAM_EFFECT_PHOTO`.
+(`bulanik` / `renk` / `foto`), `OWNCAM_EFFECT_PHOTO`, `OWNCAM_SEG_BOYUT`.
+
+`OWNCAM_SEG_BOYUT` segmentasyon aginin girdi olcusu (32'nin kati, varsayilan
+256). Buyutmek maske cozunurlugunu artirip kenardaki basamaklari azaltiyor
+ama **her sahnede iyi degil** - detayli 720p kaynakta 384 kazanc, dusuk
+detayli kaynakta zarar. Olcumler `YAPILACAKLAR.md` 3.7'de.
 
 **Kapsam Linux.** Windows sanal kamerasi (DirectShow) ve Windows derlemesi
 kapsam disi birakildi.

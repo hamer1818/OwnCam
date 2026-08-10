@@ -172,6 +172,32 @@ producing a broken-looking effect. Measured: 0.56 head-and-shoulders, 0.0000 fla
 Effects on/off switch the pipeline shape, so the receiver restarts; every
 other effect setting applies live.
 
+**The network is fully convolutional and its input size is a setting**
+(`OWNCAM_SEG_BOYUT`, multiples of 32). All three `Resize` nodes are exactly 2x
+and global average pooling is size-agnostic, so the plan scales the graph's
+baked resize targets with the input. Bigger input ⇒ higher-resolution mask ⇒
+less staircasing on the edge. **This is a trade, not a free win**: measured on
+a real 720p frame, 384 helps (uncertain pixels 1.76% → 1.66%); on a low-detail
+source it hurts badly (1.62% → 7.04% at 384, 18.03% at 512). The model drifts
+outside its training scale. Default stays 256, which is also the only size the
+reference fixture validates — `Segmenter::with_size` keeps that test immune to
+the env var.
+
+### Desktop control loop (`desktop/src/supervisor.rs`)
+
+Status polling and the receiver's lifecycle run in **their own thread**, not in
+egui's `update()`. They used to live in the paint loop, and Wayland stops
+delivering frame callbacks to an invisible surface — so the moment the window
+was minimised the app went **blind** to the phone. Measured: with the window
+minimised the phone switched 1280x720 → 1920x1080 and the app never noticed;
+restoring the window fixed it instantly. For a webcam app, which lives
+minimised, that is a defect — worst case a phone rotation leaves the receiver
+scaling a portrait frame into a landscape one until someone opens the window.
+
+The frame pipeline was always independent (`Receiver` has its own thread; the
+virtual camera keeps being fed while minimised). Only the control layer was
+coupled.
+
 ### Android (`android/app/src/main/java/com/owncam/`)
 
 `StreamService` is the owner: foreground service, wake lock, `WIFI_MODE_FULL_HIGH_PERF` WiFi
