@@ -5,7 +5,7 @@ ekran kartinda silen** Linux uygulamasi.
 
 ```bash
 cargo build --release        # target/release/owncam  (10,4 MB)
-cargo test                   # 45 test
+cargo test                   # 54 test
 ./target/release/owncam      # telefonu mDNS ile bulur
 ./target/release/owncam 192.168.1.105   # IP elle
 ```

@@ -32,7 +32,7 @@ been deleted; if you find references to `owncam-desktop.py`, they are stale.
 ```bash
 cd desktop
 cargo build --release          # target/release/owncam, 10.4 MB
-cargo test                     # 52 tests
+cargo test                     # 54 tests
 cargo test seg::plan           # one module
 cargo test olcek_buyutme       # one test by name substring
 ```
