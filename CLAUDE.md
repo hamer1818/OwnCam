@@ -116,7 +116,43 @@ Those two values only affect the first moment of a connection, not steady-state 
 
 ### Background removal (`desktop/src/seg/`)
 
-The segmentation network runs in **our own WGSL compute kernels** on a
+Two networks, one runtime. **Hizli** (default) is MediaPipe Selfie
+Segmentation, Apache-2.0, 462 KB, embedded. **Kaliteli** is Robust Video
+Matting — GPL-3.0, so the weights are **not in this repo and must not be**;
+the code takes a path (`OWNCAM_MODEL`, or the UI's "Ag" section) to a file the
+user downloads. Do not add those weights to `assets/` or `include_bytes!` them.
+
+RVM is a recurrent matting network: full-resolution alpha plus a foreground
+estimate, with four hidden states carried between frames. Measured on this
+system at 1280x720: 8.2 ms inference, 13.7 ms full composite, 299 MB arena,
+29.5 fps live at 5% CPU. Against the same tract reference used for the small
+model: max error 0.0039, mean 0.000093 — the max is exactly the fixture's u8
+quantisation floor.
+
+Its `fgr` output is what the composite blends, not the camera pixel. That is
+the difference between masking and matting: at a semi-transparent edge the
+camera pixel still carries the *old* background's colour.
+
+The plan builder is general over a useful ONNX subset, not hard-wired to one
+model. Two dev hooks make adding a model mechanical — `yabanci_model_plani`
+names the first unsupported operator, `yabanci_model_kosusu` runs it on the
+GPU and dumps the mask for comparison. Both are `#[ignore]`d and need an
+external file.
+
+Two node types produce **no dispatch at all**, and that is deliberate:
+channel-axis `Split` (already contiguous in NCHW) and the hidden states'
+`Expand` (the state buffer is kept full-size, so it is an alias). Hidden
+states live at fixed arena offsets and `rNo` is copied into `rNi` at the end
+of each frame. Verified: feeding the same frame repeatedly, the consecutive
+mask delta decays 0.0060 → 0.000023; a broken feedback path would read 0 from
+the start.
+
+`downsample_ratio` is a graph *input* in the stock RVM file, which makes shape
+inference dynamic. `Graph::set_input_constant` turns it into an initializer at
+load, so everything resolves statically and the shipped model file needs no
+patching.
+
+Both networks run in **our own WGSL compute kernels** on a
 headless wgpu device, not in an inference library. That was a measured
 decision, not a preference: `tract` solves this model in **32 ms/frame** on
 the CPU (the 30 fps budget is 33 ms) and adds 35 MB to the binary; the WGSL
@@ -138,8 +174,8 @@ mask produced by an independent ONNX runtime (`tract`); the GPU kernels are
 measured against it (max error 0.0020, mean 0.00004, below the fixture's u8
 quantisation floor of 1/255).
 
-**If you change the model or the kernels, regenerate the fixture — don't relax
-the tolerance.** The oracle is a throwaway crate outside the repo: `tract-onnx`
+**If you change the small model or the kernels, regenerate the fixture — don't
+relax the tolerance.** The oracle is a throwaway crate outside the repo: `tract-onnx`
 0.23, which needs a newer rustc than the system one (`rustup toolchain install
 stable`), fed the same 256x256 input. Two things it will fight you on: clear
 `graph.value_info` and the output types, and pin the symbolic `batch_size`
@@ -150,7 +186,7 @@ Getting here took a long detour worth not repeating: hand-implementing the
 every unit test of every operator passed. Only an independent runtime found it.
 If a mask looks subtly wrong, suspect an operator convention, not arithmetic.
 
-**The model's scope is selfie framing** — head and shoulders with a
+**The small model's scope is selfie framing** — head and shoulders with a
 distinguishable background. On an extreme close-up (face filling the frame,
 flat white wall behind) it returns a near-empty mask. That is the model's
 limit, not a bug; do not go looking for one.

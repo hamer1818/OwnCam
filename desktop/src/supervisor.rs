@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 
 use crate::phone::{Phone, Status};
 use crate::receiver::{EffectShared, FrameSlot, Receiver, ReceiverConfig};
+use crate::seg::gpu::Model;
 use crate::sink;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -37,7 +38,9 @@ type Repaint = Arc<dyn Fn() + Send + Sync>;
 
 enum Command {
     SetHost(Option<String>),
-    SetEffects(bool),
+    /// Efekt acik/kapali ve hangi ag. Ikisi de boru hattinin seklini
+    /// degistirdigi icin ayni komutta geliyorlar.
+    SetEffects(bool, Model),
     Stop,
 }
 
@@ -95,8 +98,8 @@ impl Supervisor {
         let _ = self.tx.send(Command::SetHost(host));
     }
 
-    pub fn set_effects(&self, on: bool) {
-        let _ = self.tx.send(Command::SetEffects(on));
+    pub fn set_effects(&self, on: bool, model: Model) {
+        let _ = self.tx.send(Command::SetEffects(on, model));
     }
 
     /// En son durum ve onun surumu. Surum degismediyse arayuz ozumsemiyor;
@@ -137,6 +140,7 @@ fn run(
     let mut phone = host.map(Phone::new);
     let mut receiver: Option<Receiver> = None;
     let mut effects_on = false;
+    let mut model = Model::Hizli;
     let mut last_poll = Instant::now()
         .checked_sub(POLL_INTERVAL)
         .unwrap_or_else(Instant::now);
@@ -152,9 +156,10 @@ fn run(
                         .checked_sub(POLL_INTERVAL)
                         .unwrap_or_else(Instant::now);
                 }
-                Command::SetEffects(on) => {
-                    if on != effects_on {
+                Command::SetEffects(on, m) => {
+                    if on != effects_on || m != model {
                         effects_on = on;
+                        model = m;
                         // Boru hattinin sekli degisiyor; alici yeniden kurulmali.
                         receiver = None;
                     }
@@ -173,6 +178,7 @@ fn run(
                             &status,
                             &p.host,
                             effects_on,
+                            &model,
                             preview_pixels,
                             preview_fps,
                             &slot,
@@ -210,6 +216,7 @@ fn sync_receiver(
     status: &Status,
     host: &str,
     effects_on: bool,
+    model: &Model,
     preview_pixels: u32,
     preview_fps: u32,
     slot: &Arc<FrameSlot>,
@@ -236,6 +243,7 @@ fn sync_receiver(
         preview_pixels,
         preview_fps,
         effects: effects_on,
+        model: model.clone(),
     };
     if receiver.as_ref().map(|r| &r.config) == Some(&wanted) {
         return;

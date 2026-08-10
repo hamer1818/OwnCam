@@ -8,6 +8,7 @@ use crate::phone::{Phone, Status};
 use crate::photo;
 use crate::receiver::{EffectShared, FrameSlot};
 use crate::seg::effects::{Background, Settings as EffectSettings};
+use crate::seg::gpu::Model;
 use crate::sink;
 use crate::supervisor::Supervisor;
 
@@ -47,6 +48,9 @@ pub struct EffectUi {
     pub color: [f32; 3],
     pub sharpness: f32,
     pub photo: String,
+    /// Kaliteli agin (RVM) ONNX dosyasi. Bos ise gomulu hizli ag kullaniliyor.
+    /// Depoda agirlik yok - lisansi farkli, kullanici kendisi indiriyor.
+    pub model_path: String,
 }
 
 impl Default for EffectUi {
@@ -57,6 +61,7 @@ impl Default for EffectUi {
             color: [0.05, 0.35, 0.6],
             sharpness: 0.35,
             photo: String::new(),
+            model_path: String::new(),
         }
     }
 }
@@ -72,6 +77,9 @@ impl EffectUi {
         }
         if let Ok(path) = std::env::var("OWNCAM_EFFECT_PHOTO") {
             ui.photo = path;
+        }
+        if let Ok(path) = std::env::var("OWNCAM_MODEL") {
+            ui.model_path = path;
         }
         ui
     }
@@ -96,6 +104,22 @@ impl EffectUi {
             2 => Background::Color(self.color),
             3 => Background::Image,
             _ => Background::Off,
+        }
+    }
+
+    /// Secili ag. Yol bossa gomulu olan.
+    pub fn model(&self) -> Model {
+        let yol = self.model_path.trim();
+        if yol.is_empty() {
+            Model::Hizli
+        } else {
+            Model::Kaliteli {
+                yol: yol.into(),
+                oran: std::env::var("OWNCAM_ORAN")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0.375),
+            }
         }
     }
 
@@ -233,7 +257,7 @@ impl OwnCamApp {
             effects.clone(),
             move || ctx.request_repaint(),
         );
-        supervisor.set_effects(effect.enabled());
+        supervisor.set_effects(effect.enabled(), effect.model());
 
         let mut app = Self {
             phone: host.clone().map(Phone::new),
@@ -403,7 +427,7 @@ impl OwnCamApp {
         ui.separator();
         ui.strong("Arka plan");
 
-        let onceki_acik = self.effect.enabled();
+        let onceki = (self.effect.enabled(), self.effect.model());
         combo(
             ui,
             "efekt",
@@ -447,6 +471,7 @@ impl OwnCamApp {
             ui.add(
                 egui::Slider::new(&mut self.effect.sharpness, 0.0..=1.0).text("kenar sertligi"),
             );
+            self.model_ui(ui);
             let (err, gpu, coverage) = {
                 let shared = self.effects.lock().unwrap();
                 (shared.error.clone(), shared.gpu.clone(), shared.coverage)
@@ -463,11 +488,45 @@ impl OwnCamApp {
             }
         }
 
-        // Ayarlari isleyiciye ilet; acik/kapali degistiyse alici yeniden kurulmali.
+        // Ayarlari isleyiciye ilet; acik/kapali ya da ag degistiyse alici
+        // yeniden kurulmali - kalan ayarlar akisi kesmeden canli uygulaniyor.
         self.effects.lock().unwrap().settings = self.effect.settings();
-        if self.effect.enabled() != onceki_acik {
-            self.supervisor.set_effects(self.effect.enabled());
+        if (self.effect.enabled(), self.effect.model()) != onceki {
+            self.supervisor
+                .set_effects(self.effect.enabled(), self.effect.model());
         }
+    }
+
+    /// Ag secimi. Varsayilan gomulu ag; ikinci secenek kullanicinin indirdigi
+    /// bir RVM dosyasi. Agirliklar depoda gelmiyor - lisansi (GPL-3.0) MIT
+    /// olan bu projeyle birlikte dagitmaya uygun degil - bu yuzden burada
+    /// yalnizca dosya yolu isteniyor.
+    fn model_ui(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Ag")
+            .default_open(false)
+            .show(ui, |ui| {
+                let kaliteli = !self.effect.model_path.trim().is_empty();
+                ui.label(if kaliteli {
+                    "kaliteli: tam cozunurlukte alfa, sac kenari korunuyor"
+                } else {
+                    "hizli: gomulu kucuk ag, kaba maske"
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("ONNX sec...").clicked() {
+                        if let Some(path) = photo::pick_model() {
+                            self.effect.model_path = path;
+                        }
+                    }
+                    if kaliteli && ui.button("Gomuluye don").clicked() {
+                        self.effect.model_path.clear();
+                    }
+                });
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.effect.model_path)
+                        .hint_text("rvm_mobilenetv3_fp32.onnx yolu"),
+                );
+                ui.small("RVM agirliklari ayri indiriliyor; bkz. README.");
+            });
     }
 
     fn load_photo(&self, path: String) {

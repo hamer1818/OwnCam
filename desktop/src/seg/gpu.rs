@@ -63,7 +63,9 @@ pub enum Model {
 
 impl Model {
     /// Ortamdan sec: `OWNCAM_MODEL` bir ONNX yolu verirse kaliteli ag,
-    /// yoksa gomulu olan.
+    /// yoksa gomulu olan. Uretim yolunda arayuz kendi ayarini kullaniyor;
+    /// bu yalnizca olcum kancalari icin.
+    #[cfg(test)]
     pub fn from_env() -> Self {
         match std::env::var("OWNCAM_MODEL") {
             Ok(yol) if !yol.is_empty() => Model::Kaliteli {

@@ -88,7 +88,7 @@ pub fn load(path: &str) -> Result<Photo, String> {
 /// calisma zamanina baglaniyor; ikisi de bu boyut butcesine agir. Seciciyi
 /// bulamazsak arayuzdeki metin kutusu zaten yolu elle almaya devam ediyor.
 pub fn pick() -> Option<String> {
-    let denemeler: [(&str, &[&str]); 2] = [
+    secici(&[
         (
             "zenity",
             &[
@@ -101,9 +101,27 @@ pub fn pick() -> Option<String> {
             "kdialog",
             &["--getopenfilename", ".", "Goruntu (*.png *.jpg *.jpeg *.webp *.bmp *.avif)"],
         ),
-    ];
+    ])
+}
+
+/// Ag dosyasi (ONNX) secicisi.
+pub fn pick_model() -> Option<String> {
+    secici(&[
+        (
+            "zenity",
+            &[
+                "--file-selection",
+                "--title=Segmentasyon agi (ONNX)",
+                "--file-filter=ONNX | *.onnx",
+            ],
+        ),
+        ("kdialog", &["--getopenfilename", ".", "ONNX (*.onnx)"]),
+    ])
+}
+
+fn secici(denemeler: &[(&str, &[&str])]) -> Option<String> {
     for (program, args) in denemeler {
-        let Ok(out) = Command::new(program).args(args).output() else {
+        let Ok(out) = Command::new(program).args(*args).output() else {
             continue;
         };
         if !out.status.success() {

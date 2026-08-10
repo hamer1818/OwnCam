@@ -14,4 +14,20 @@ Apache-2.0 lisansinin tam metni:
   https://www.apache.org/licenses/LICENSE-2.0
 
 Model dosyasi degistirilmeden, indirildigi haliyle depoya eklenmistir.
+
+
+Robust Video Matting (istege bagli, DEPODA YOK)
+------------------------------------------------
+Uygulama "kaliteli" ag secildiginde RVM'nin ONNX dosyasini okuyabiliyor.
+
+  Telif hakki: Peter Lin
+  Lisans:      GNU General Public License v3.0
+  Kaynak:      https://github.com/PeterL1n/RobustVideoMatting
+
+Bu agirliklar bu depoda **dagitilmiyor** ve OwnCam ikilisine gomulmuyor;
+lisansi bu projeninkiyle (MIT) bagdasmiyor. Kod yalnizca kullanicinin kendi
+indirdigi bir dosyanin yolunu aliyor. Dosyayi indiren kullanici o dosya
+bakimindan GPL-3.0 kosullarina tabidir.
+
+
 Projenin geri kalani MIT lisansi altindadir (bkz. LICENSE).

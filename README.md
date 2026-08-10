@@ -108,6 +108,25 @@ Efekt ekran kartinda kosuyor — bu sistemde kare basina 2,1 ms. Islemcide ayni
 is 32 ms surerdi, yani 30 fps butcesini tek basina doldururdu; olcum ve gerekce
 icin `desktop/README.md`.
 
+#### Daha iyi kenar isteyenler icin: kaliteli ag
+
+Varsayilan ag kucuk ve hizli ama kaba: saci kesiyor ve kenarda yeni arka
+planin renginden bir hale birakiyor. **Robust Video Matting** sac tellerini
+ve ince nesneleri (kulaklik kablosu gibi) koruyor ve kareler arasinda daha
+duragan.
+
+Agirliklari depoya koyamiyoruz — RVM **GPL-3.0**, OwnCam MIT — bu yuzden
+dosyayi kendiniz indiriyorsunuz:
+
+1. RVM'nin surumler sayfasindan `rvm_mobilenetv3_fp32.onnx` (15 MB) indirin.
+2. Uygulamada **Arka plan > Ag > ONNX sec...** ile gosterin.
+   (Ya da `OWNCAM_MODEL=/yol/rvm_mobilenetv3_fp32.onnx` ile baslatin.)
+
+Bedeli olculdu: 1280x720'de kare basina 13,7 ms (hizli agda 1,9 ms). Butce
+33 ms, yani hala rahat siginiyor — canli olcumde sanal kamera 29,5 fps ve
+uygulama islemcinin %5'ini kullaniyor. Ekran karti belleginden ~300 MB
+istiyor.
+
 Efekt olmadan da kullanilabilir; kapaliyken kareler uygulamaya hic ugramaz ve
 olculmus dusuk gecikmeli yol aynen korunur.
 

@@ -72,7 +72,7 @@ pub struct EffectShared {
     pub coverage: Option<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReceiverConfig {
     pub host: String,
     pub fps: u32,
@@ -85,6 +85,9 @@ pub struct ReceiverConfig {
     /// Kareler uygulamadan gecsin mi. Boru hattinin seklini degistirdigi
     /// icin degisince alici yeniden kuruluyor.
     pub effects: bool,
+    /// Arka plani ayiran ag. Plan kare olcusune gore kuruldugu icin bu da
+    /// alicinin omruyle bagli: degisirse yeniden kuruluyor.
+    pub model: Model,
 }
 
 impl ReceiverConfig {
@@ -157,7 +160,7 @@ fn run(
     // baglanmada yuklemek gereksiz.
     let mut processor = None;
     if config.effects {
-        let model = Model::from_env();
+        let model = config.model.clone();
         match Processor::new(&model, config.frame) {
             Ok(p) => {
                 let mut shared = effects.lock().unwrap();
@@ -464,6 +467,7 @@ mod tests {
             preview_pixels: 640 * 360,
             preview_fps: 15,
             effects: false,
+            model: Model::Hizli,
         }
     }
 

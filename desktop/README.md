@@ -11,7 +11,8 @@ cargo test                   # 54 test
 ```
 
 Ortam degiskenleri: `OWNCAM_HOST`, `OWNCAM_DEVICE`, `OWNCAM_EFFECT`
-(`bulanik` / `renk` / `foto`), `OWNCAM_EFFECT_PHOTO`, `OWNCAM_SEG_BOYUT`.
+(`bulanik` / `renk` / `foto`), `OWNCAM_EFFECT_PHOTO`, `OWNCAM_SEG_BOYUT`,
+`OWNCAM_MODEL` (kaliteli agin ONNX yolu), `OWNCAM_ORAN`.
 
 `OWNCAM_SEG_BOYUT` segmentasyon aginin girdi olcusu (32'nin kati, varsayilan
 256). Buyutmek maske cozunurlugunu artirip kenardaki basamaklari azaltiyor
@@ -68,8 +69,45 @@ trafigini uce katliyordu.
 
 ## Arka plan silme
 
-MediaPipe Selfie Segmentation (Apache-2.0, `assets/selfie_segmentation.onnx`,
-462 KB) kendi WGSL cekirdeklerimizle kosuyor. Hazir cikarim kutuphanesi
+Iki ag secilebiliyor ve ikisi de **ayni** calisma zamanindan geciyor:
+
+| | hizli (varsayilan) | kaliteli |
+|---|---|---|
+| Ag | MediaPipe Selfie Segmentation | Robust Video Matting (MobileNetV3) |
+| Lisans | Apache-2.0 | GPL-3.0 |
+| Depoda | evet, 462 KB gomulu | **hayir**, kullanici indiriyor |
+| Girdi | 256x256 kare | kare cozunurlugu (icinde kuculuyor) |
+| Cikti | maske, 256x256 | alfa + on plan, tam cozunurluk |
+| Kareler arasi | bagimsiz | gizli durum tasiyor |
+| Cikarim (1280x720) | 1,0 ms | 8,2 ms |
+| Tam kompozit | 1,9 ms | 13,7 ms |
+
+Olculen fark:
+
+- **Kenar.** Hizli ag saci kesiyor ve kenarda yeni arka planin rengiyle bir
+  hale birakiyor; RVM sac tellerini ve kulaklik kablosunu koruyor. RVM'nin
+  `fgr` ciktisi kompozitte kullaniliyor - maskeleme ile matting'in farki bu:
+  yari saydam bir pikselde **eski** arka planin rengi ayikliyor.
+- **Titreme.** Ayni sahneye kare basina bagimsiz gurultu eklenip ardisik
+  maske farki olculdu, ikisi de kare cozunurlugune buyutulerek: hizli
+  0,00045, RVM 0,00025. Gercek ama olculu bir kazanc - RVM'nin asil ustunlugu
+  kenar kalitesi.
+- **Hiz.** Canli, telefon 1280x720 @ 30 fps: sanal kamera 29,5 fps, uygulama
+  %5 islemci. Tam cozunurlukte RVM kare hizini dusurmuyor.
+
+RVM agirliklari depoda **yok** ve olamaz: RVM GPL-3.0, OwnCam MIT. Kod
+agirlik dagitmiyor, yalnizca yol aliyor:
+
+```bash
+# rvm_mobilenetv3_fp32.onnx dosyasini RVM'nin kendi surumlerinden indirin
+OWNCAM_MODEL=/yol/rvm_mobilenetv3_fp32.onnx ./target/release/owncam 192.168.1.105
+```
+
+Arayuzde de "Arka plan > Ag" bolumunden secilebiliyor. `OWNCAM_ORAN` ag
+govdesinin kareyi kucultme orani (varsayilan 0,375; RVM 1080p icin 0,25
+oneriyor).
+
+Ikisi de kendi WGSL cekirdeklerimizle kosuyor. Hazir cikarim kutuphanesi
 kullanilmadi ve sebebi olculdu:
 
 | Yol | Kare basina | Ikiliye etkisi |
@@ -87,18 +125,31 @@ Modulun bolumleri:
   ettigi icin sema uretimi olmadan guvenle gezilebiliyor. Yuklemede agirlik
   butunlugu denetleniyor: sekil carpimi ile ham bayt uzunlugu tutmazsa dosya
   reddediliyor, sessizce yanlis sonuc uretilmiyor.
-- `seg/plan.rs` - girdi sabit (1x3x256x256) oldugu icin butun sekiller, dolgu
-  degerleri ve tampon kaymalari yuklemede bir kez hesaplaniyor. `Shape`,
-  `Slice` ve `Concat` dugumleri yalnizca `Resize`'in hedef boyutunu kuruyor;
-  GPU'ya hic gitmiyorlar, sayi olarak katlaniyorlar. 145 dugumun 136'si
-  sevke doniyor.
-- `seg/seg.wgsl` - evrisim (gruplu; `group == kanal` oldugunda derinlemesine),
-  transpoze evrisim, iki dogrusal buyutme, kuresel ortalama ve eleman bazli
-  cekirdekler. Kuresel ortalama is grubu basina bir kanal alip paylasilan
-  bellekte agac indirgeme yapiyor. Butun ara tensorler tek bir arena
-  tamponunu (30 MB), butun
-  agirliklar tek bir tamponu paylasiyor; her sevk yalnizca kayma tasiyor.
-  Boylece 136 adim icin tek baglama grubu yetiyor.
+- `seg/plan.rs` - girdi olcusu yuklemede belli oldugu icin butun sekiller,
+  dolgu degerleri ve tampon kaymalari bir kez hesaplaniyor. `Constant`,
+  `Shape`, `Slice` ve `Concat` dugumleri sayi olarak katlaniyor, GPU'ya hic
+  gitmiyorlar. Selfie modelinde 145 dugumun 136'si sevke doniyor, RVM'de
+  353 dugum 296 sevke.
+
+  Iki dugum **hic** sevk uretmiyor cunku yalnizca kayma aritmetigi: kanal
+  ekseninde `Split` (NCHW'de zaten bitisik) ve gizli durumun `Expand`'i
+  (durumu tam boyutta tuttugumuz icin takma ad, kopya degil).
+
+  RVM'nin `downsample_ratio` girdisi yuklemede sabite ceviriliyor
+  (`Graph::set_input_constant`); boylece butun sekiller statik cozuluyor ve
+  model dosyasini yamalamak gerekmiyor.
+- `seg/seg.wgsl` - evrisim (gruplu, genislemeli, istege bagli yanlilik),
+  transpoze evrisim, keyfi olcekli iki dogrusal olcekleme, havuzlama,
+  indirgemeler, yayinli ikili islemler ve eleman bazli cekirdekler. Kuresel
+  ortalama is grubu basina bir kanal alip paylasilan bellekte agac indirgeme
+  yapiyor. Butun ara tensorler tek bir arena tamponunu (hizli agda 30 MB,
+  RVM'de 1280x720 icin 299 MB), butun agirliklar tek bir tamponu paylasiyor;
+  her sevk yalnizca kayma tasiyor. Boylece butun adimlar icin tek baglama
+  grubu yetiyor.
+- Gizli durumlar arenada **kalici** yer tutuyor; kare sonunda `rNo` bolgesi
+  `rNi` bolgesine kopyalaniyor. Geri beslemenin calistigi olculdu: ayni kare
+  tekrar verilince ardisik maske farki 0,0060'tan 0,000023'e sonumleniyor
+  (kopuk olsaydi bastan 0 olurdu).
 - `seg/effects.wgsl` - kompozit. Bulanik arka plan **ceyrek cozunurlukte**
   hesaplaniyor (ayrilabilir Gauss, iki gecis), sonra iki dogrusal
   buyutuluyor: tam cozunurlukte 16 kat daha pahali ve gozle ayirt edilmiyor.
@@ -113,6 +164,21 @@ GPU cekirdeklerimiz bu maskeye karsi olculuyor - **en buyuk fark 0,0020,
 ortalama 0,00004**. Demirbasin u8 niceleme tabani 1/255 = 0,0039 oldugundan
 fark olcum gurultusunun altinda.
 
+RVM ayni yontemle dogrulandi: gercek bir 1280x720 kare, ayni tract kosusuna
+karsi **en buyuk fark 0,0039, ortalama 0,000093** - en buyuk fark tam olarak
+referansin nicemleme tabani. 296 sevkin hepsi, yeni operatorler dahil.
+Agirliklar depoya girmedigi icin bu bir birim testi degil, elle calistirilan
+bir kanca:
+
+```bash
+OWNCAM_MODEL=/yol/rvm.onnx OWNCAM_HAM=/tmp/ham_rgb.bin OWNCAM_GIRDI=1280x720 \
+  OWNCAM_CIKTI=/tmp/gpu_alpha.f32 \
+  cargo test --release yabanci_model_kosusu -- --ignored --nocapture
+```
+
+Kardesi `yabanci_model_plani` yalnizca plani kuruyor ve desteklenmeyen ilk
+operatoru tek satirda soyluyor; yeni bir model denerken islerin sirasi bu.
+
 Bu denetim ucuz degil, gerekliydi: modeli elle uygularken uc ayri operator
 yorumu denendi ve hangisinin dogru oldugu ancak bagimsiz bir referansla
 anlasildi. Ozellikle iki ayrinti sezgiye aykiri:
@@ -125,8 +191,8 @@ anlasildi. Ozellikle iki ayrinti sezgiye aykiri:
 
 ### Modelin sinirlari
 
-Ag "selfie" cercevesi icin egitilmis: bas ve omuzlar, arkada ayirt edilebilir
-bir arka plan. Asiri yakin cekimde - yuzun kareyi doldurdugu, arkasinin duz
+Bu bolum **hizli** ag icin. Ag "selfie" cercevesi icin egitilmis: bas ve
+omuzlar, arkada ayirt edilebilir bir arka plan. Asiri yakin cekimde - yuzun kareyi doldurdugu, arkasinin duz
 beyaz duvar oldugu bir karede - maskeyi neredeyse bos uretiyor. Bu bir hata
 degil, modelin kapsami. Kamerayi bas-omuz cercevesine alinca sorun kalkiyor.
 

@@ -363,7 +363,7 @@ Yukaridaki maddelerin cogu kapandi. Acik kalanlar ve **neden** acik kaldiklari:
 | 2.1 ayna | ayar hazir; varsayilan kapali, yonu kullanima gore sen sec |
 | 2.2 kilitlenme | **gercek telefonda dogrulandi**, kapandi |
 | 2.3 dayaniklilik | **olculdu**: 30 dk, 0 dusen kare, termal kisma yok |
-| 3.1 model kapsami | uyari eklendi; daha iyi model (or. RVM) denenmedi |
+| 3.1 model kapsami | uyari eklendi; RVM secenek olarak eklendi (asagida) |
 | 3.2 titreme | olculdu, is cikmadi |
 | 3.3 islemci bedeli | YUV420 ile %15,5 -> %9,7 |
 | 3.4 reduce_mean | paralellestirildi, 1,99 -> 1,35 ms |
@@ -382,9 +382,25 @@ JSON'a kazara ikinci bir `bitrate` alani girdi, curl ve python bunu hos gordu,
 dongusu stderr'e yaziliyor hem de Kotlin sablonunu okuyup cift anahtar arayan
 bir test var.
 
-**RVM olculdu** (bkz. 3.1): kenar kalitesi belirgin sekilde daha iyi, saç
-tellerini cozuyor. Ama modeli 0,46 MB'tan 7,5-15 MB'a cikariyor ve calisma
-zamanina ConvGRU + yinelemeli durum + birkac cekirdek daha gerektiriyor.
-Kullanicinin bastaki sarti "hafif ikili"ydi; su an 512'ye cikmak kenarin
-buyuk kismini zaten kapatiyor. Karar: **simdilik yapilmiyor**, gerekce ve
-olcumler 3.1'de.
+### RVM — YAPILDI (2026-08-10)
+
+Onceki karar "simdilik yapilmiyor"du ve gerekcesi tek bir sarta dayaniyordu:
+ikilinin hafif kalmasi. Kullanici o sarti kaldirinca karar da degisti.
+
+Yapilanlar:
+
+- Plan kurucu ve cekirdekler tek bir modele degil, genel bir ONNX alt kumesine
+  calisiyor: yayinli Add/Sub/Mul/Div, Tanh, HardSigmoid, Clip, AveragePool,
+  kanal ekseninde ReduceMean, Concat/Split, veri uzerinde Slice, genisleme,
+  yanliliksiz evrisim, keyfi olcekli Resize.
+- Cok girdili/ciktili graf ve yinelemeli gizli durum.
+- `fgr` ciktisi kompozitte kullaniliyor (maskeleme degil, matting).
+- Arayuzde ag secimi; agirliklar depoda degil (GPL-3.0 / MIT).
+
+Olculenler (RTX 5080, 1280x720): cikarim 8,2 ms, tam kompozit 13,7 ms, canli
+29,5 fps / %5 islemci, arena 299 MB. tract'e karsi en buyuk fark 0,0039,
+ortalama 0,000093 — en buyuk fark referansin nicemleme tabani.
+
+Kazanc durust olcusuyle: **kenar** belirgin (sac telleri, kulaklik kablosu
+duruyor; hizli agda kesiliyor ve kenarda hale kaliyor). **Titreme** kazanci
+olculu: 0,00045 -> 0,00025. RVM'yi hakli cikaran sey kenar, duraganlik degil.
