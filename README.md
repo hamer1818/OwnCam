@@ -3,6 +3,10 @@
 Telefon kamerasini WiFi uzerinden Linux'ta sanal webcam yapan uygulama.
 [telefon-kamera-plani.md](telefon-kamera-plani.md) Faz 0 uygulamasi.
 
+**Kurmak icin:** [surumler sayfasindan](https://github.com/hamer1818/OwnCam/releases)
+APK'yi ve Linux arsivini indir, [KURULUM.md](KURULUM.md)'yi izle. Sifirdan
+kurulum, kullanim ve sorun giderme orada.
+
 ```
 Android 10                                    Linux (CachyOS)
 Camera2 ─> SurfaceTexture ─> GL ─┬─> MediaCodec ─> TCP :5299 ─> ffmpeg ─> /dev/video11

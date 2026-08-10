@@ -15,9 +15,29 @@ android {
         versionName = "0.1.0"
     }
 
+    // Yayin imzasi depoda **degil**: anahtar deposu ve parolalari ortam
+    // degiskeninden geliyor. Verilmezse yayin APK'si imzasiz cikar - bu
+    // bilerek boyle, cunku sessizce hata ayiklama anahtariyla imzalamak
+    // sonraki surumlerin ustune yuklenmesini kalici olarak bozardi.
+    val ks = System.getenv("OWNCAM_KEYSTORE")
+    signingConfigs {
+        if (ks != null) {
+            create("release") {
+                storeFile = file(ks)
+                storePassword = System.getenv("OWNCAM_KEYSTORE_PAROLA")
+                keyAlias = System.getenv("OWNCAM_KEY_ALIAS") ?: "owncam"
+                keyPassword = System.getenv("OWNCAM_KEY_PAROLA")
+                    ?: System.getenv("OWNCAM_KEYSTORE_PAROLA")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (ks != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             isMinifyEnabled = false
