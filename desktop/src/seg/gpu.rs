@@ -504,6 +504,107 @@ mod tests {
         (*state >> 8) as f32 / (1u32 << 24) as f32
     }
 
+    /// Kaynaktan iki dogrusal ornekleme (u,v 0..1).
+    fn ornekle(rgba: &[u8], w: usize, h: usize, u: f32, v: f32) -> [f32; 3] {
+        let fx = (u * w as f32 - 0.5).clamp(0.0, w as f32 - 1.0);
+        let fy = (v * h as f32 - 0.5).clamp(0.0, h as f32 - 1.0);
+        let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+        let (tx, ty) = (fx - fx.floor(), fy - fy.floor());
+        let at = |x: usize, y: usize, c: usize| rgba[(y * w + x) * 4 + c] as f32 / 255.0;
+        let mut out = [0.0f32; 3];
+        for (c, o) in out.iter_mut().enumerate() {
+            let a = at(x0, y0, c) * (1.0 - tx) + at(x1, y0, c) * tx;
+            let b = at(x0, y1, c) * (1.0 - tx) + at(x1, y1, c) * tx;
+            *o = a * (1.0 - ty) + b * ty;
+        }
+        out
+    }
+
+    /// **Olcum**: agin girdisi nasil hazirlanmali?
+    ///
+    /// Kare 16:9, agin girdisi 1:1. Su an kare **eziliyor**, yani en-boy
+    /// orani 1,78 kat bozuluyor. Ag duzgun oranli selfie'lerle egitildigi
+    /// icin bu zarar veriyor olabilir. Uc secenek karsilastiriliyor:
+    /// ezme (mevcut), ortadan kare kirpma, ve orani koruyup kutulama.
+    ///
+    /// Olcut **kararsizlik**: maskenin 0,2-0,8 arasinda kalan piksel orani.
+    /// Iyi bir maske iki kutuplu; ortada kalan piksel agin emin olamadigi
+    /// yerdir. Yani kucuk deger daha iyi.
+    ///
+    /// ```text
+    /// OWNCAM_KARE=/tmp/kare.rgba OWNCAM_EN=1280 OWNCAM_BOY=720 \
+    ///   cargo test --release girdi_hazirlama -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "olcum; gercek kare dosyasi gerektirir"]
+    fn girdi_hazirlama() {
+        let Ok(seg) = Segmenter::new() else {
+            eprintln!("ekran karti yok");
+            return;
+        };
+        let Ok(path) = std::env::var("OWNCAM_KARE") else {
+            eprintln!("OWNCAM_KARE verilmedi");
+            return;
+        };
+        let w: usize = std::env::var("OWNCAM_EN").unwrap().parse().unwrap();
+        let h: usize = std::env::var("OWNCAM_BOY").unwrap().parse().unwrap();
+        let rgba = std::fs::read(&path).unwrap();
+        assert_eq!(rgba.len(), w * h * 4, "kare boyutu tutmuyor");
+
+        let n = INPUT.w;
+        let aspect = w as f32 / h as f32;
+
+        for mod_ad in ["ezme", "kirpma", "kutulama"] {
+            let mut input = vec![0.0f32; INPUT.len()];
+            for y in 0..n {
+                for x in 0..n {
+                    // Hedef pikselin kaynaktaki (u,v) karsiligi
+                    let (mut u, mut v) = ((x as f32 + 0.5) / n as f32, (y as f32 + 0.5) / n as f32);
+                    let mut disarida = false;
+                    match mod_ad {
+                        // Oran bozuluyor; butun kare kullaniliyor.
+                        "ezme" => {}
+                        // Oran dogru; genis kenardan kirpiliyor.
+                        "kirpma" => {
+                            if aspect >= 1.0 {
+                                u = 0.5 + (u - 0.5) / aspect;
+                            } else {
+                                v = 0.5 + (v - 0.5) * aspect;
+                            }
+                        }
+                        // Oran dogru; bosluk gri kaliyor.
+                        _ => {
+                            if aspect >= 1.0 {
+                                v = 0.5 + (v - 0.5) * aspect;
+                            } else {
+                                u = 0.5 + (u - 0.5) / aspect;
+                            }
+                            disarida = !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v);
+                        }
+                    }
+                    let c = if disarida {
+                        [0.5, 0.5, 0.5]
+                    } else {
+                        ornekle(&rgba, w, h, u, v)
+                    };
+                    for (ch, value) in c.iter().enumerate() {
+                        input[(ch * n + y) * n + x] = *value;
+                    }
+                }
+            }
+
+            let mask = seg.mask(&input).expect("maske");
+            let kapsam = mask.iter().sum::<f32>() / mask.len() as f32;
+            let kararsiz = mask.iter().filter(|m| (0.2..=0.8).contains(*m)).count() as f32
+                / mask.len() as f32;
+            eprintln!(
+                "{mod_ad:9} kapsam {kapsam:.3}  kararsiz piksel {:.4}",
+                kararsiz
+            );
+        }
+    }
+
     /// **Olcum**: maske ardisik karelerde ne kadar titriyor?
     ///
     /// Gercek bir video dizisi yerine ayni kareye kare basina bagimsiz

@@ -170,6 +170,30 @@ Kalan secenek (yapilmadi): uygulama `/dev/video11`'e dogrudan yazsin
 (`VIDIOC_S_FMT` + `write`), ikinci ffmpeg tamamen kalksin. Artik kazanc
 daha kucuk ve `unsafe` ioctl gerektiriyor; gerekce zayifladi.
 
+### 3.6 Girdi hazirlama — OLCULDU, mevcut davranis dogru
+
+Kare 16:9, agin girdisi 1:1; su an kare **eziliyor** ve en-boy orani 1,78 kat
+bozuluyor. Bunun modele zarar verdigi dusunuldu ve uc secenek olculdu.
+
+Olcut **kararsizlik**: maskenin 0,2-0,8 arasinda kalan piksel orani. Iyi maske
+iki kutupludur; ortada kalan piksel agin emin olamadigi yerdir, yani kucuk
+deger daha iyi.
+
+| Yontem | Gercek telefon karesi | Portre demirbasi |
+|---|---|---|
+| **ezme (mevcut)** | **%1,76** | **%1,62** |
+| ortadan kirpma | %1,88 | %5,63 |
+| orani koruyup kutulama | %8,74 | %11,32 |
+
+Ezme her iki sahnede de en iyisi; kutulama belirgin sekilde en kotusu (gri
+bantlar agi sasirtiyor). Model ezilmis girdiyle egitilmis - MediaPipe'in kendi
+boru hatti da oyle yapiyor.
+
+**Degistirilmedi.** Bu, yapilmamasi gereken bir "iyilestirme"ydi; olcmeden
+yapilsa kaliteyi dusurecekti.
+
+`cargo test --release girdi_hazirlama -- --ignored --nocapture`
+
 ### 3.5 Kilavuzlu maske buyutme — DENENDI, geri alindi
 
 256x256'lik maske tam cozunurluge iki dogrusal buyutuluyor ve kenar yumusak
