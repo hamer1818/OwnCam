@@ -170,6 +170,33 @@ Kalan secenek (yapilmadi): uygulama `/dev/video11`'e dogrudan yazsin
 (`VIDIOC_S_FMT` + `write`), ikinci ffmpeg tamamen kalksin. Artik kazanc
 daha kucuk ve `unsafe` ioctl gerektiriyor; gerekce zayifladi.
 
+### 3.5 Kilavuzlu maske buyutme — DENENDI, geri alindi
+
+256x256'lik maske tam cozunurluge iki dogrusal buyutuluyor ve kenar yumusak
+kaliyor. Denenen cozum: ortak-ikili (joint bilateral) buyutme - her maske
+komsusunun agirligini, o komsunun bulundugu yerdeki renkle bu pikselin rengi
+arasindaki farka gore azaltmak. Maskenin goruntunun kendi kenarina yapismasi
+bekleniyordu.
+
+Olculdu (gecis bandi = ne arka plana ne kaynaga benzeyen piksel orani):
+
+| Sahne | Kapali | Kilavuzlu |
+|---|---|---|
+| Dusuk kontrast (soluk oda) | %1,05 | %0,97 |
+| Yuksek kontrast (portre) | %0,93 | %0,90 |
+
+Kenar keskinliginde kazanc %0,6 - %2,6. Maliyet ucuzdu (+0,04 ms) ama kazanc
+gozle secilemiyor.
+
+**Neden bu kadar kucuk:** kenardaki yumuszaklik buyutmeden degil, **modelin
+kendi maskesinden** geliyor. Ag zaten yumusak kenarli bir olasilik haritasi
+uretiyor; ornekleme ne kadar akillansa da maskenin hic tasimadigi detayi geri
+getiremiyor. Kenar sertligi kaydiraci (smoothstep) ayni sorunu daha dogrudan
+ele aliyor.
+
+Geri alindi. Kenari gercekten iyilestirmenin yolu daha yuksek cozunurluklu
+ya da daha iyi bir model (bkz. 3.1), ornekleme numarasi degil.
+
 ### 3.4 `reduce_mean` cekirdegi — PARALELLESTIRILDI
 
 Kanal basina tek is parcacigi vardi ve H*W uzerinde seri topluyordu; 16-128
