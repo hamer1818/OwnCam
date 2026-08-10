@@ -125,8 +125,19 @@ Secenekler, ucu de denenmedi:
   altindaysa). Ucuz, durustce bilgilendirir.
 - 144x256'lik yatay model surumunu yatay karelerde kullan. Model dosyasi
   ayni aileden, plan altyapisi zaten degisken girdi olcusunu kaldiriyor.
-- Daha buyuk bir model (or. RVM). Kalite artar, 1,99 ms'lik butce buyur —
-  once olc, sonra karar ver.
+- Daha buyuk bir model (or. RVM). **Olculdu.** `tract` ile ayni kare uzerinde
+  kosturuldu: alfa tam cozunurlukte cikiyor ve saç tellerini cozuyor, bizim
+  256'lik maskemiz ise basamakli. Kapsam ikisinde de ayni (0,120), yani kisiyi
+  bulma yetenegi farkli degil - fark **kenar detayinda**.
+
+  Yapilmadi, sebebi: model 0,46 MB'tan 7,5 MB'a (fp16) ya da 15 MB'a (fp32)
+  ciyor ve calisma zamanina ConvGRU + yinelemeli durum + Concat/Split/Tanh
+  cekirdekleri gerekiyor. Kullanicinin bastaki sarti hafif ikiliydi. Ustelik
+  ag cozunurlugunu 512'ye cikarmak (bkz. 3.7) kenarin buyuk kismini bedava
+  kapatiyor.
+
+  Karari degistirecek sey: kenar kalitesinin gercek kullanimda yetmedigi
+  gorulurse, ya da ikili boyutu sarti gevserse.
 
 ### 3.2 Zamansal kararlilik — OLCULDU, is cikmadi
 
@@ -169,6 +180,34 @@ Renk uzayinda gidip gelmenin hatasi ortalama 0,90/255 — pratikte kayipsiz.
 Kalan secenek (yapilmadi): uygulama `/dev/video11`'e dogrudan yazsin
 (`VIDIOC_S_FMT` + `write`), ikinci ffmpeg tamamen kalksin. Artik kazanc
 daha kucuk ve `unsafe` ioctl gerektiriyor; gerekce zayifladi.
+
+### 3.7 Ag cozunurlugu — AYAR OLDU (varsayilan degismedi)
+
+Maske kenarindaki basamaklarin kaynagi 256x256'lik maskenin tam cozunurluge
+5 kat buyutulmesi. Model **tamamen evrisimli** (butun `Resize`'lar tam iki
+kat, kuresel ortalama her olcude calisiyor), o yuzden plan hedef boyutlari
+girdiye gore olceklenecek sekilde degistirildi ve ag baska cozunurluklerde de
+kosabilir hale geldi.
+
+Olcum, gercek 720p telefon karesi:
+
+| Olcu | Kare basina | Kararsiz piksel | Kenar |
+|---|---|---|---|
+| 256 (varsayilan) | 1,4-1,8 ms | %1,76 | kaba, basamakli |
+| 384 | 2,1 ms | %1,66 | gozle daha ince |
+| 512 | 2,7 ms | %2,14 | sac telleri secilir |
+
+**Ama bedava degil.** Ikinci sahnede (256px icerikten buyutulmus demirbas)
+yuksek cozunurluk cok daha kotu: kararsizlik %1,62 -> %7,04 -> %18,03. Ag
+egitildigi olcegin disinda, ustelik detayi olmayan bir kaynakta sasiriyor.
+
+Bu yuzden **varsayilan 256'da birakildi** ve olcu `OWNCAM_SEG_BOYUT` ile
+acilabilir hale getirildi (32'nin kati, 128-1024). Detayli gercek bir kaynakta
+384 net kazanc; dusuk detayli kaynakta zarar.
+
+Not: referans demirbas 256'da uretildi, dolayisiyla dogruluk guvencesi yalnizca
+o olcude var. `Segmenter::with_size` sayesinde test ortam degiskeninden
+etkilenmiyor.
 
 ### 3.6 Girdi hazirlama — OLCULDU, mevcut davranis dogru
 
@@ -343,6 +382,9 @@ JSON'a kazara ikinci bir `bitrate` alani girdi, curl ve python bunu hos gordu,
 dongusu stderr'e yaziliyor hem de Kotlin sablonunu okuyup cift anahtar arayan
 bir test var.
 
-Sonraki adim icin en degerli aday **3.1**: model bas-omuz cercevesi disinda
-zayif. RVM gibi daha iyi bir model kalitesi artirir ama 1,35 ms'lik butceyi
-buyutur — once olc, sonra karar ver.
+**RVM olculdu** (bkz. 3.1): kenar kalitesi belirgin sekilde daha iyi, saç
+tellerini cozuyor. Ama modeli 0,46 MB'tan 7,5-15 MB'a cikariyor ve calisma
+zamanina ConvGRU + yinelemeli durum + birkac cekirdek daha gerektiriyor.
+Kullanicinin bastaki sarti "hafif ikili"ydi; su an 512'ye cikmak kenarin
+buyuk kismini zaten kapatiyor. Karar: **simdilik yapilmiyor**, gerekce ve
+olcumler 3.1'de.

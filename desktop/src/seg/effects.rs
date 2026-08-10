@@ -455,8 +455,8 @@ impl Processor {
             mask_h: mask.h as u32,
             mode: background.mode(),
             input_off: self.seg.input_offset(),
-            net_w: super::gpu::INPUT.w as u32,
-            net_h: super::gpu::INPUT.h as u32,
+            net_w: self.seg.input_size().w as u32,
+            net_h: self.seg.input_size().h as u32,
             bg_w: self.bg_size.0,
             bg_h: self.bg_size.1,
             preview_w: s.preview_w,
@@ -498,7 +498,7 @@ impl Processor {
                 run(
                     &mut pass,
                     TO_INPUT,
-                    (super::gpu::INPUT.w * super::gpu::INPUT.h) as u32,
+                    (self.seg.input_size().w * self.seg.input_size().h) as u32,
                 );
                 self.seg.encode(&mut pass);
                 // Maske kapsami: modelin kisiyi bulup bulamadigini arayuze

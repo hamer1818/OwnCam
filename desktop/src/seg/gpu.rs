@@ -15,7 +15,24 @@ use std::borrow::Cow;
 use super::onnx;
 use super::plan::{self, Kind, Plan, Shape};
 
-/// Agin bekledigi girdi olcusu (modelde sabit).
+/// Agin girdi olcusu.
+///
+/// Model 256x256 ile egitildi ama tamamen evrisimli: butun `Resize`'lar tam
+/// iki kat, kuresel ortalama her olcude calisiyor. Plan hedef boyutlari
+/// girdiye gore olcekledigi icin ag baska cozunurluklerde de kosabiliyor.
+/// Daha buyuk girdi = daha yuksek cozunurluklu maske = daha az basamakli
+/// kenar; bedeli karesel.
+pub fn input_shape() -> Shape {
+    let n = std::env::var("OWNCAM_SEG_BOYUT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        // 32'nin kati olmali: ag girdiyi bes kez yariya bolup geri buyutuyor.
+        .map(|v| (v / 32).clamp(4, 32) * 32)
+        .unwrap_or(plan::REFERENCE_INPUT);
+    Shape { c: 3, h: n, w: n }
+}
+
+/// Geriye donuk uyumluluk icin varsayilan olcu.
 pub const INPUT: Shape = Shape {
     c: 3,
     h: 256,
@@ -118,8 +135,16 @@ pub struct Segmenter {
 
 impl Segmenter {
     pub fn new() -> Result<Self, String> {
+        Self::with_size(input_shape())
+    }
+
+    /// Belirli bir girdi olcusuyle kur.
+    ///
+    /// Referans testi bunu 256'ya sabitliyor: demirbas o olcude uretildi ve
+    /// ortam degiskeni testin dogruladigi seyi degistirmemeli.
+    pub fn with_size(shape: Shape) -> Result<Self, String> {
         let graph = onnx::parse(MODEL)?;
-        let plan = plan::build(&graph, INPUT)?;
+        let plan = plan::build(&graph, shape)?;
 
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -336,6 +361,11 @@ impl Segmenter {
         self.plan.output_shape
     }
 
+    /// Agin bu ornekte kullandigi girdi olcusu.
+    pub fn input_size(&self) -> Shape {
+        self.plan.input_shape
+    }
+
     /// Agin butun adimlarini verilen hesap gecisine yaz. Kompozitle tek
     /// komut tamponunu paylasmak icin ayri duruyor: kare basina tek gonderim.
     pub fn encode(&self, pass: &mut wgpu::ComputePass<'_>) {
@@ -357,10 +387,10 @@ impl Segmenter {
     /// karsi sayisal dogrulama icin duruyor (bkz. `tests/fixtures/`).
     #[allow(dead_code)]
     pub fn mask(&self, input: &[f32]) -> Result<Vec<f32>, String> {
-        if input.len() != INPUT.len() {
+        if input.len() != self.plan.input_shape.len() {
             return Err(format!(
                 "girdi {} eleman olmali, {} geldi",
-                INPUT.len(),
+                self.plan.input_shape.len(),
                 input.len()
             ));
         }
@@ -552,11 +582,11 @@ mod tests {
         let rgba = std::fs::read(&path).unwrap();
         assert_eq!(rgba.len(), w * h * 4, "kare boyutu tutmuyor");
 
-        let n = INPUT.w;
+        let n = seg.input_size().w;
         let aspect = w as f32 / h as f32;
 
         for mod_ad in ["ezme", "kirpma", "kutulama"] {
-            let mut input = vec![0.0f32; INPUT.len()];
+            let mut input = vec![0.0f32; seg.input_size().len()];
             for y in 0..n {
                 for x in 0..n {
                     // Hedef pikselin kaynaktaki (u,v) karsiligi
@@ -595,6 +625,11 @@ mod tests {
             }
 
             let mask = seg.mask(&input).expect("maske");
+            if let Ok(dir) = std::env::var("OWNCAM_MASKE_DIZIN") {
+                let bytes: Vec<u8> =
+                    mask.iter().map(|m| (m.clamp(0.0, 1.0) * 255.0) as u8).collect();
+                let _ = std::fs::write(format!("{dir}/maske_{mod_ad}.bin"), bytes);
+            }
             let kapsam = mask.iter().sum::<f32>() / mask.len() as f32;
             let kararsiz = mask.iter().filter(|m| (0.2..=0.8).contains(*m)).count() as f32
                 / mask.len() as f32;
@@ -663,7 +698,8 @@ mod tests {
 
     #[test]
     fn maske_referansla_ortusuyor() {
-        let seg = match Segmenter::new() {
+        // Demirbas 256x256'da uretildi; olcu ortamdan gelmemeli.
+        let seg = match Segmenter::with_size(INPUT) {
             Ok(s) => s,
             // Ekran karti olmayan ortamda (CI) sessizce atla.
             Err(e) => {

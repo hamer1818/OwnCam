@@ -79,6 +79,10 @@ pub struct Plan {
     pub output_shape: Shape,
 }
 
+/// Modelin egitildigi girdi olcusu. Graftaki sabit `Resize` hedefleri buna
+/// gore yazilmis; baska bir olcude calisirken ayni oranda olcekleniyor.
+pub const REFERENCE_INPUT: usize = 256;
+
 /// Arenanin sonunda ayrilan calisma alani (f32 cinsinden).
 const SCRATCH: usize = 4;
 
@@ -179,7 +183,14 @@ pub fn build(graph: &Graph, input: Shape) -> Result<Plan, String> {
                     if let Some(Folded::Ints(v)) = folded.get(name) {
                         all.extend(v.iter().copied());
                     } else if let Some(t) = graph.init.get(name) {
-                        all.extend(t.i64s());
+                        // Sabit hedef boyutlar 256x256 girdiye gore yazilmis;
+                        // baska bir olcude calisirken ayni oranda buyutuluyor.
+                        let scale = input.w as f64 / REFERENCE_INPUT as f64;
+                        all.extend(
+                            t.i64s()
+                                .into_iter()
+                                .map(|v| (v as f64 * scale).round() as i64),
+                        );
                     } else {
                         return Err(format!("Concat: {name} sabit degil"));
                     }
@@ -338,11 +349,24 @@ pub fn build(graph: &Graph, input: Shape) -> Result<Plan, String> {
                 if sizes.len() != 4 {
                     return Err(format!("Resize: hedef boyut {sizes:?}"));
                 }
+                // Hedef boyut grafta **sabit** (32/64/128) ama uctan uca
+                // hepsi tam 2 kat buyutme. Sabiti oldugu gibi kullanmak agi
+                // 256x256'ya cakiyor; oysa ag tamamen evrisimli ve carpani
+                // korursak her cozunurlukte calisiyor.
+                let (th, tw) = (sizes[2] as usize, sizes[3] as usize);
+                let oran_h = th as f64 / in_shape.h as f64;
+                let oran_w = tw as f64 / in_shape.w as f64;
+                if (oran_h - 2.0).abs() > 1e-6 || (oran_w - 2.0).abs() > 1e-6 {
+                    return Err(format!(
+                        "Resize: yalnizca 2 kat destekleniyor ({}x{} -> {th}x{tw})",
+                        in_shape.h, in_shape.w
+                    ));
+                }
                 step.kind = Kind::Resize;
                 step.out_shape = Shape {
                     c: in_shape.c,
-                    h: sizes[2] as usize,
-                    w: sizes[3] as usize,
+                    h: in_shape.h * 2,
+                    w: in_shape.w * 2,
                 };
             }
             other => return Err(format!("desteklenmeyen operator: {other}")),
@@ -446,6 +470,29 @@ mod tests {
         // Dosyadaki 425 668 baytin 64'u sekil hesabinin int64 sabitleri;
         // GPU'ya yalnizca kalan f32 agirliklar gidiyor.
         assert_eq!(p.weights.len(), (425668 - 64) / 4);
+    }
+
+    /// Ag tamamen evrisimli: baska girdi olculerinde de plan kurulabilmeli ve
+    /// cikti ayni oranda buyumeli.
+    #[test]
+    fn plan_baska_cozunurluklerde_de_kurulur() {
+        let g = super::super::onnx::parse(MODEL).unwrap();
+        for n in [128usize, 256, 384, 512] {
+            let p = build(&g, Shape { c: 3, h: n, w: n })
+                .unwrap_or_else(|e| panic!("{n} icin plan kurulmadi: {e}"));
+            assert_eq!(
+                p.output_shape,
+                Shape { c: 1, h: n, w: n },
+                "{n}: cikti olcusu girdiyle ayni olmali"
+            );
+            // Butun olcek buyutmeler tam iki kat kalmali.
+            for s in p.steps.iter().filter(|s| s.kind == Kind::Resize) {
+                assert_eq!(s.out_shape.h, s.in_shape.h * 2, "{n}: resize 2 kat degil");
+                assert_eq!(s.out_shape.w, s.in_shape.w * 2, "{n}: resize 2 kat degil");
+            }
+            // Adim sayisi cozunurlukten bagimsiz.
+            assert_eq!(p.steps.len(), 136, "{n}: adim sayisi degisti");
+        }
     }
 
     /// Calisma alani agin cikti bolgesiyle cakismamali.
