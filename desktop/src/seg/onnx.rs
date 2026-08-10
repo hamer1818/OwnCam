@@ -51,6 +51,9 @@ pub struct Attr {
     pub f: f32,
     pub s: String,
     pub ints: Vec<i64>,
+    pub floats: Vec<f32>,
+    /// `Constant` dugumlerinin tasidigi tensor (AttributeProto alan 5).
+    pub tensor: Option<Tensor>,
 }
 
 #[derive(Debug)]
@@ -76,6 +79,15 @@ impl Node {
 
     pub fn text(&self, name: &str) -> &str {
         self.attr(name).map(|a| a.s.as_str()).unwrap_or("")
+    }
+
+    pub fn floats(&self, name: &str) -> &[f32] {
+        self.attr(name).map(|a| a.floats.as_slice()).unwrap_or(&[])
+    }
+
+    /// `Constant` dugumunun degeri.
+    pub fn tensor(&self, name: &str) -> Option<&Tensor> {
+        self.attr(name).and_then(|a| a.tensor.as_ref())
     }
 }
 
@@ -180,6 +192,15 @@ fn parse_tensor(buf: &[u8]) -> Tensor {
             (1, Val::Num(v)) => t.dims.push(v as usize),
             (1, Val::Bytes(b)) => t.dims.extend(packed_varints(b).iter().map(|v| *v as usize)),
             (2, Val::Num(v)) => t.dtype = v as i32,
+            // ONNX sayilari ya `raw_data` (alan 9) ya da tipe ozel paketli
+            // alanlarda tasiyor. Ikisini de ham bayta indiriyoruz ki geri
+            // kalan kod tek bir yol gorsun.
+            (4, Val::Bytes(b)) => t.raw.extend_from_slice(b),
+            (7, Val::Bytes(b)) => {
+                for v in packed_varints(b) {
+                    t.raw.extend_from_slice(&v.to_le_bytes());
+                }
+            }
             (8, Val::Bytes(b)) => name = text(b),
             (9, Val::Bytes(b)) => t.raw = b.to_vec(),
             _ => {}
@@ -211,6 +232,13 @@ fn parse_attr(buf: &[u8]) -> Attr {
             }
             (3, Val::Num(v)) => a.i = v as i64,
             (4, Val::Bytes(b)) => a.s = text(b),
+            (5, Val::Bytes(b)) => a.tensor = Some(parse_tensor(b)),
+            (7, Val::Bytes(b)) => {
+                a.floats = b
+                    .chunks_exact(4)
+                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect()
+            }
             (8, Val::Num(v)) => a.ints.push(v as i64),
             (8, Val::Bytes(b)) => a.ints.extend(packed_varints(b)),
             _ => {}

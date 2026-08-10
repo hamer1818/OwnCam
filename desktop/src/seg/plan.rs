@@ -89,6 +89,9 @@ const SCRATCH: usize = 4;
 /// Sekil hesaplarinda kullanilan, GPU'ya gitmeyen sabit vektorler.
 enum Folded {
     Ints(Vec<i64>),
+    /// RVM'de `Constant` dugumleri sekil vektoru disinda **veri** de tasiyor
+    /// (normalizasyonun ortalama/standart sapmasi gibi).
+    Floats(Vec<f32>, Vec<usize>),
 }
 
 pub fn build(graph: &Graph, input: Shape) -> Result<Plan, String> {
@@ -142,6 +145,19 @@ pub fn build(graph: &Graph, input: Shape) -> Result<Plan, String> {
 
         // --- yalnizca sekil hesabi yapan dugumler: sabit katlama ---
         match node.op.as_str() {
+            "Constant" => {
+                let t = node
+                    .tensor("value")
+                    .ok_or_else(|| format!("Constant {out_name}: deger yok"))?;
+                match t.dtype {
+                    onnx::DT_INT64 => folded.insert(out_name, Folded::Ints(t.i64s())),
+                    onnx::DT_FLOAT => {
+                        folded.insert(out_name, Folded::Floats(t.floats(), t.dims.clone()))
+                    }
+                    other => return Err(format!("Constant {out_name}: tip {other}")),
+                };
+                continue;
+            }
             "Shape" => {
                 let s = shapes
                     .get(&node.input[0])
@@ -155,7 +171,7 @@ pub fn build(graph: &Graph, input: Shape) -> Result<Plan, String> {
             "Slice" => {
                 let src = match folded.get(&node.input[0]) {
                     Some(Folded::Ints(v)) => v.clone(),
-                    None => return Err("Slice yalnizca sekil vektorlerinde destekleniyor".into()),
+                    _ => return Err("Slice yalnizca sekil vektorlerinde destekleniyor".into()),
                 };
                 let get = |i: usize| -> Result<i64, String> {
                     let name = node
@@ -178,31 +194,66 @@ pub fn build(graph: &Graph, input: Shape) -> Result<Plan, String> {
                 continue;
             }
             "Concat" => {
-                let mut all = Vec::new();
-                for name in &node.input {
-                    if let Some(Folded::Ints(v)) = folded.get(name) {
-                        all.extend(v.iter().copied());
-                    } else if let Some(t) = graph.init.get(name) {
-                        // Sabit hedef boyutlar 256x256 girdiye gore yazilmis;
-                        // baska bir olcude calisirken ayni oranda buyutuluyor.
-                        let scale = input.w as f64 / REFERENCE_INPUT as f64;
-                        all.extend(
-                            t.i64s()
-                                .into_iter()
-                                .map(|v| (v as f64 * scale).round() as i64),
-                        );
-                    } else {
-                        return Err(format!("Concat: {name} sabit degil"));
+                // Sabit vektorler: Resize'in `scales`/`sizes` girdileri.
+                // Hem katlanmis `Constant`lardan hem de baslaticilardan
+                // gelebiliyor; ikisini de tek yerde cozuyoruz.
+                let as_floats = |n: &String| -> Option<Vec<f32>> {
+                    match folded.get(n) {
+                        Some(Folded::Floats(v, _)) => Some(v.clone()),
+                        _ => graph
+                            .init
+                            .get(n)
+                            .filter(|t| t.dtype == onnx::DT_FLOAT)
+                            .map(|t| t.floats()),
                     }
+                };
+                let as_ints = |n: &String| -> Option<Vec<i64>> {
+                    match folded.get(n) {
+                        Some(Folded::Ints(v)) => Some(v.clone()),
+                        _ => graph
+                            .init
+                            .get(n)
+                            .filter(|t| t.dtype == onnx::DT_INT64)
+                            .map(|t| t.i64s()),
+                    }
+                };
+
+                if node.input.iter().all(|n| as_ints(n).is_some()) {
+                    let scale = input.w as f64 / REFERENCE_INPUT as f64;
+                    let mut all = Vec::new();
+                    for n in &node.input {
+                        let v = as_ints(n).unwrap();
+                        // Sabit hedef boyutlar 256'lik girdiye gore yazilmis;
+                        // baska olcude ayni oranda buyutuluyor. Katlanmis
+                        // sekil parcalari (batch/kanal) oldugu gibi kaliyor.
+                        if folded.contains_key(n) {
+                            all.extend(v);
+                        } else {
+                            all.extend(v.into_iter().map(|x| (x as f64 * scale).round() as i64));
+                        }
+                    }
+                    folded.insert(out_name, Folded::Ints(all));
+                    continue;
                 }
-                folded.insert(out_name, Folded::Ints(all));
-                continue;
+                if node.input.iter().all(|n| as_floats(n).is_some()) {
+                    let mut all = Vec::new();
+                    for n in &node.input {
+                        all.extend(as_floats(n).unwrap());
+                    }
+                    let len = all.len();
+                    folded.insert(out_name, Folded::Floats(all, vec![len]));
+                    continue;
+                }
+                // Sabit degil: gercek kanal birlestirmesi. Asagida ele aliniyor.
             }
             _ => {}
         }
 
         // --- gercek hesap dugumleri ---
-        let in_name = &node.input[0];
+        let in_name = node
+            .input
+            .first()
+            .ok_or_else(|| format!("{}: girdisi olmayan dugum ({out_name})", node.op))?;
         let in_shape = *shapes
             .get(in_name)
             .ok_or_else(|| format!("{}: {} sekli bilinmiyor", node.op, in_name))?;
@@ -328,10 +379,37 @@ pub fn build(graph: &Graph, input: Shape) -> Result<Plan, String> {
                 };
             }
             "Resize" => {
+                // `pytorch_half_pixel`, `half_pixel`ten yalnizca cikti boyutu 1
+                // oldugunda ayriliyor (o durumda 0'a esliyor). Bu aglarda oyle
+                // bir olcek yok, ayni cekirdek ikisini de karsiliyor.
+                let ctm = node.text("coordinate_transformation_mode");
                 if node.text("mode") != "linear"
-                    || node.text("coordinate_transformation_mode") != "half_pixel"
+                    || !matches!(ctm, "half_pixel" | "pytorch_half_pixel")
                 {
-                    return Err("Resize: yalnizca half_pixel linear destekleniyor".into());
+                    return Err(format!(
+                        "Resize: yalnizca half_pixel linear destekleniyor (mode={}, ctm={ctm})",
+                        node.text("mode")
+                    ));
+                }
+                // ONNX Resize hedefi ya `scales` (girdi 2) ya da `sizes`
+                // (girdi 3) ile veriyor; ikisi de destekleniyor.
+                if let Some(scales_name) = node.input.get(2).filter(|n| !n.is_empty()) {
+                    if let Some(Folded::Floats(v, _)) = folded.get(scales_name) {
+                        if v.len() != 4 {
+                            return Err(format!("Resize: olcek vektoru {v:?}"));
+                        }
+                        step.kind = Kind::Resize;
+                        step.out_shape = Shape {
+                            c: in_shape.c,
+                            h: ((in_shape.h as f32) * v[2]).round() as usize,
+                            w: ((in_shape.w as f32) * v[3]).round() as usize,
+                        };
+                        step.out = alloc(step.out_shape, &mut arena_len);
+                        shapes.insert(out_name.clone(), step.out_shape);
+                        offsets.insert(out_name, step.out);
+                        steps.push(step);
+                        continue;
+                    }
                 }
                 let sizes_name = node
                     .input
@@ -340,7 +418,7 @@ pub fn build(graph: &Graph, input: Shape) -> Result<Plan, String> {
                     .clone();
                 let sizes = match folded.get(&sizes_name) {
                     Some(Folded::Ints(v)) => v.clone(),
-                    None => graph
+                    _ => graph
                         .init
                         .get(&sizes_name)
                         .map(|t| t.i64s())
@@ -470,6 +548,44 @@ mod tests {
         // Dosyadaki 425 668 baytin 64'u sekil hesabinin int64 sabitleri;
         // GPU'ya yalnizca kalan f32 agirliklar gidiyor.
         assert_eq!(p.weights.len(), (425668 - 64) / 4);
+    }
+
+    /// **Gelistirme kancasi**: baska bir ONNX modelinin plani kurulabiliyor mu?
+    ///
+    /// Depoya girmeyen buyuk modelleri (or. RVM) denerken hangi operatorun
+    /// eksik oldugunu tek satirda soyluyor.
+    ///
+    /// ```text
+    /// OWNCAM_MODEL=/yol/model.onnx OWNCAM_GIRDI=1280x720 \
+    ///   cargo test --release yabanci_model_plani -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "elle calistirilir; harici model dosyasi gerektirir"]
+    fn yabanci_model_plani() {
+        let Ok(path) = std::env::var("OWNCAM_MODEL") else {
+            eprintln!("OWNCAM_MODEL verilmedi");
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("model okunamadi");
+        let g = super::super::onnx::parse(&bytes).expect("ONNX ayristirilamadi");
+        eprintln!("dugum {} baslatici {}", g.nodes.len(), g.init.len());
+        let (w, h) = std::env::var("OWNCAM_GIRDI")
+            .ok()
+            .and_then(|v| {
+                let (a, b) = v.split_once('x')?;
+                Some((a.parse().ok()?, b.parse().ok()?))
+            })
+            .unwrap_or((256usize, 256usize));
+        match build(&g, Shape { c: 3, h, w }) {
+            Ok(p) => eprintln!(
+                "plan kuruldu: {} adim, arena {:.1} MB, agirlik {:.1} MB, cikti {:?}",
+                p.steps.len(),
+                (p.arena_len * 4) as f64 / 1e6,
+                (p.weights.len() * 4) as f64 / 1e6,
+                p.output_shape
+            ),
+            Err(e) => eprintln!("PLAN KURULAMADI: {e}"),
+        }
     }
 
     /// Ag tamamen evrisimli: baska girdi olculerinde de plan kurulabilmeli ve
