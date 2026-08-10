@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=OwnCam
+GenericName=Telefon Webcam
+GenericName[en]=Phone Webcam
+Comment=Telefon kamerasini WiFi uzerinden sanal webcam yapar
+Comment[en]=Turns your phone camera into a virtual webcam over WiFi
+Exec=owncam
+Icon=owncam
+Terminal=false
+# Tek ana kategori (AudioVideo); ikinci bir ana kategori eklemek uygulamayi
+# menude iki kez gosteriyor.
+Categories=AudioVideo;Video;Recorder;
+# Arama kutusuna bunlardan biri yazilinca da cikmali. Turkce ve Ingilizce
+# karsiliklar birlikte: kullanicinin masaustu dili hangisi olursa olsun.
+Keywords=webcam;kamera;camera;telefon;phone;android;sanal;virtual;sanal kamera;virtual camera;arka plan;background;bulanik;blur;yesil ekran;droidcam;iriun;v4l2;
+StartupNotify=true
+StartupWMClass=owncam

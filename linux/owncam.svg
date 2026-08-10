@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- OwnCam simgesi: telefon govdesi + objektif + WiFi yayilimi.
+       Geometrik tutuldu, cunku 32 pikselde de okunmasi gerekiyor. -->
+  <defs>
+    <linearGradient id="zemin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b6cb0"/>
+      <stop offset="1" stop-color="#1a365d"/>
+    </linearGradient>
+    <radialGradient id="cam" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#63b3ed"/>
+      <stop offset="0.55" stop-color="#2c5282"/>
+      <stop offset="1" stop-color="#0f2540"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#zemin)"/>
+
+  <!-- telefon govdesi. Beyaz cerceve kalin tutuldu: 32 pikselde ince bir
+       kenar zeminle karisip telefonu tanimsiz bir lekeye ceviriyordu. -->
+  <rect x="128" y="88" width="228" height="336" rx="40" fill="#f7fafc"/>
+  <rect x="158" y="118" width="168" height="276" rx="20" fill="#16202e"/>
+
+  <!-- objektif: iki halka yetiyor, ucuncusu kucuk olcude kayboluyor -->
+  <circle cx="242" cy="256" r="86" fill="#f7fafc"/>
+  <circle cx="242" cy="256" r="66" fill="url(#cam)"/>
+  <circle cx="219" cy="233" r="20" fill="#ffffff" opacity="0.9"/>
+
+  <!-- WiFi yayilimi: telefonun sagindan disari -->
+  <g fill="none" stroke="#90cdf4" stroke-linecap="round" stroke-width="30">
+    <path d="M 390 190 A 96 96 0 0 1 390 322"/>
+    <path d="M 440 146 A 168 168 0 0 1 440 366" opacity="0.7"/>
+  </g>
+</svg>

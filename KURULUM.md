@@ -91,27 +91,34 @@ v4l2-ctl --list-devices | grep -A2 OwnCam
 
 ## 3. PC — masaustu uygulamasi
 
-Surumden inen arsivi ac ve calistir:
+Surumden inen arsivi ac ve kurulum betigini calistir:
 
 ```bash
 tar xzf owncam-0.1.0-linux-x86_64.tar.gz
 cd owncam-0.1.0-linux-x86_64
-./owncam
+./kur-masaustu.sh
 ```
 
-Telefonu mDNS ile kendi buluyor. Bulamazsa IP'yi ver:
+**sudo yok** — her sey `~/.local` altina gidiyor:
+
+| Ne | Nereye |
+|---|---|
+| Uygulama | `~/.local/bin/owncam` |
+| Menu girdisi | `~/.local/share/applications/owncam.desktop` |
+| Simgeler | `~/.local/share/icons/hicolor/…` (SVG + 16–256 px) |
+
+Bundan sonra **uygulama menusunde "OwnCam" olarak gorunuyor**; arama kutusuna
+`webcam`, `kamera`, `telefon`, `camera`, `arka plan` ya da `droidcam` yazinca
+da cikiyor. Tiklayinca aciliyor, gorev cubugunda kendi simgesiyle duruyor.
+
+Kaldirmak icin `./kaldir-masaustu.sh` — yazdigi her seyi geri aliyor.
+
+Kurmadan, oldugu yerden denemek istersen `./owncam` de calisir. Telefonu mDNS
+ile kendi buluyor; bulamazsa IP'yi ver:
 
 ```bash
 ./owncam 192.168.1.42
 ```
-
-Kalici kurmak istersen:
-
-```bash
-install -Dm755 owncam ~/.local/bin/owncam
-```
-
-`~/.local/bin` `PATH`'te degilse kabuk yapilandirmana ekle.
 
 Artik goruntu `/dev/video11`'de. Zoom, Meet, Discord, OBS — kamera listesinden
 **OwnCam**'i sec.
@@ -203,6 +210,15 @@ owncam-measure.sh 15          # 15 saniye kare hizi / titreme olcumu
 ---
 
 ## 6. Bir seyler ters giderse
+
+**Menude gorunuyor ama tiklayinca acilmiyor.** Kurulum betigi `Exec` satirina
+mutlak yolu yaziyor, tam da bu yuzden — ama uygulamayi elle kopyaladiysan
+menudeki girdi `~/.local/bin`'i oturumun `PATH`'inde arar ve cogu dagitimda
+orada olmaz. `./kur-masaustu.sh` ile kur.
+
+**Menude cikmiyor.** Bazi masaustleri veritabanini gec tazeliyor; oturumu
+kapatip acmak yetiyor. Girdinin gecerli oldugunu su dogrular:
+`desktop-file-validate ~/.local/share/applications/owncam.desktop`
 
 **Uygulama telefonu bulamiyor.** Ikisi ayni WiFi'da mi? Bazi yonlendiriciler
 "istemci yalitimi" ile cihazlarin birbirini gormesini engelliyor. IP'yi elle

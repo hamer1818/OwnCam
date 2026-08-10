@@ -96,6 +96,15 @@ cd desktop && cargo build --release
 ./target/release/owncam            # telefonu mDNS ile bulur
 ```
 
+Uygulama menusune eklemek icin (sudo yok, her sey `~/.local` altina):
+
+```bash
+linux/kur-masaustu.sh              # kaldirmak icin: linux/kaldir-masaustu.sh
+```
+
+Menu girdisi, simge (SVG + 16–256 px) ve `~/.local/bin/owncam` kuruluyor;
+arama kutusunda `webcam` / `kamera` / `telefon` gibi kelimelerle de cikiyor.
+
 Sag paneldeki **Arka plan** bolumunden secilir:
 
 | Secim | Ne yapar |
