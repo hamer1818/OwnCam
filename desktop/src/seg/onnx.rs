@@ -51,7 +51,6 @@ pub struct Attr {
     pub f: f32,
     pub s: String,
     pub ints: Vec<i64>,
-    pub floats: Vec<f32>,
     /// `Constant` dugumlerinin tasidigi tensor (AttributeProto alan 5).
     pub tensor: Option<Tensor>,
 }
@@ -69,6 +68,10 @@ impl Node {
         self.attrs.iter().find(|a| a.name == name)
     }
 
+    pub fn float(&self, name: &str, default: f32) -> f32 {
+        self.attr(name).map(|a| a.f).unwrap_or(default)
+    }
+
     pub fn ints(&self, name: &str) -> &[i64] {
         self.attr(name).map(|a| a.ints.as_slice()).unwrap_or(&[])
     }
@@ -81,10 +84,6 @@ impl Node {
         self.attr(name).map(|a| a.s.as_str()).unwrap_or("")
     }
 
-    pub fn floats(&self, name: &str) -> &[f32] {
-        self.attr(name).map(|a| a.floats.as_slice()).unwrap_or(&[])
-    }
-
     /// `Constant` dugumunun degeri.
     pub fn tensor(&self, name: &str) -> Option<&Tensor> {
         self.attr(name).and_then(|a| a.tensor.as_ref())
@@ -95,8 +94,35 @@ impl Node {
 pub struct Graph {
     pub nodes: Vec<Node>,
     pub init: HashMap<String, Tensor>,
+    /// Tek girdili aglar icin kisayol: `inputs[0]`.
     pub input: String,
+    /// Tek ciktili aglar icin kisayol: `outputs[0]`.
     pub output: String,
+    /// Baslatici olmayan butun girdiler. RVM gibi yinelemeli aglarda gizli
+    /// durum tamponlari da burada geliyor.
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+}
+
+impl Graph {
+    /// Bir graf **girdisini** sabite cevir.
+    ///
+    /// RVM `downsample_ratio`'yu calisma zamani girdisi olarak aliyor; bu da
+    /// sekil cikarimini dinamik yapiyor. Deger bizim icin bir **ayar**, kare
+    /// basina degisen bir sey degil - baslaticiya cevirince butun graf
+    /// yuklemede cozulebiliyor. Modeli dosya olarak yamalamak yerine burada
+    /// yapiyoruz ki depoda stok model dursun.
+    pub fn set_input_constant(&mut self, name: &str, value: f32) {
+        self.inputs.retain(|n| n != name);
+        self.init.insert(
+            name.to_string(),
+            Tensor {
+                dims: vec![1],
+                dtype: DT_FLOAT,
+                raw: value.to_le_bytes().to_vec(),
+            },
+        );
+    }
 }
 
 // ---- protobuf tel bicimi -----------------------------------------------
@@ -233,12 +259,6 @@ fn parse_attr(buf: &[u8]) -> Attr {
             (3, Val::Num(v)) => a.i = v as i64,
             (4, Val::Bytes(b)) => a.s = text(b),
             (5, Val::Bytes(b)) => a.tensor = Some(parse_tensor(b)),
-            (7, Val::Bytes(b)) => {
-                a.floats = b
-                    .chunks_exact(4)
-                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                    .collect()
-            }
             (8, Val::Num(v)) => a.ints.push(v as i64),
             (8, Val::Bytes(b)) => a.ints.extend(packed_varints(b)),
             _ => {}
@@ -309,11 +329,12 @@ pub fn parse(bytes: &[u8]) -> Result<Graph, String> {
 
     // Baslaticilar da `input` listesinde gorunebiliyor; gercek girdi
     // baslatici olmayanidir.
+    let inputs: Vec<String> = inputs.into_iter().filter(|n| !init.contains_key(n)).collect();
     let input = inputs
-        .into_iter()
-        .find(|n| !init.contains_key(n))
+        .first()
+        .cloned()
         .ok_or("ONNX grafinda girdi bulunamadi")?;
-    let output = outputs.into_iter().next().ok_or("ONNX grafinda cikti yok")?;
+    let output = outputs.first().cloned().ok_or("ONNX grafinda cikti yok")?;
 
     // Agirliklarin butunlugu: sekil carpimi ham bayt uzunlugunu vermeli.
     // Ayristirma kaymissa burada patlar, sessizce yanlis sonuc uretmez.
@@ -341,6 +362,8 @@ pub fn parse(bytes: &[u8]) -> Result<Graph, String> {
         init,
         input,
         output,
+        inputs,
+        outputs,
     })
 }
 

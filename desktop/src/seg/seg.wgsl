@@ -28,9 +28,14 @@ struct Params {
     pad_t: u32,
     pad_l: u32,
     groups: u32,
+    dilation: u32,
+    b_c: u32,      // ikinci islenenin sekli; yayin bunun uzerinden
+    b_h: u32,
+    b_w: u32,
+    alpha: f32,    // HardSigmoid egimi / Clip alt siniri
+    beta: f32,     // HardSigmoid kaymasi / Clip ust siniri
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
 };
 
 @group(0) @binding(0) var<storage, read_write> arena: array<f32>;
@@ -64,10 +69,10 @@ fn conv(@builtin(global_invocation_id) gid: vec3<u32>) {
         let in_base = p.a + (ic0 + ic) * p.in_h * p.in_w;
         let w_base = wbase + ic * p.kh * p.kw;
         for (var ky = 0u; ky < p.kh; ky = ky + 1u) {
-            let iy = i32(oy * p.stride + ky) - i32(p.pad_t);
+            let iy = i32(oy * p.stride + ky * p.dilation) - i32(p.pad_t);
             if (iy < 0 || iy >= i32(p.in_h)) { continue; }
             for (var kx = 0u; kx < p.kw; kx = kx + 1u) {
-                let ix = i32(ox * p.stride + kx) - i32(p.pad_l);
+                let ix = i32(ox * p.stride + kx * p.dilation) - i32(p.pad_l);
                 if (ix < 0 || ix >= i32(p.in_w)) { continue; }
                 acc = acc
                     + arena[in_base + u32(iy) * p.in_w + u32(ix)]
@@ -208,17 +213,135 @@ fn sigmoid(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 
 @compute @workgroup_size(64)
-fn add(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn tanh_op(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= out_total()) { return; }
-    arena[p.out + idx] = arena[p.a + idx] + arena[p.b + idx];
+    arena[p.out + idx] = tanh(arena[p.a + idx]);
 }
 
-/// [1,C,H,W] * [1,C,1,1] - sikistir-uyar blogunun kanal agirliklandirmasi.
 @compute @workgroup_size(64)
-fn mul_channel(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn hard_sigmoid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= out_total()) { return; }
+    arena[p.out + idx] = clamp(p.alpha * arena[p.a + idx] + p.beta, 0.0, 1.0);
+}
+
+@compute @workgroup_size(64)
+fn clip_op(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= out_total()) { return; }
+    arena[p.out + idx] = clamp(arena[p.a + idx], p.alpha, p.beta);
+}
+
+@compute @workgroup_size(64)
+fn copy_op(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= out_total()) { return; }
+    arena[p.out + idx] = arena[p.a + idx];
+}
+
+/// Uzamsal kirpma; baslangic kosesi pad_t/pad_l.
+@compute @workgroup_size(64)
+fn crop(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= out_total()) { return; }
+    let ox = idx % p.out_w;
+    let oy = (idx / p.out_w) % p.out_h;
     let oc = idx / (p.out_w * p.out_h);
-    arena[p.out + idx] = arena[p.a + idx] * arena[p.b + oc];
+    arena[p.out + idx] =
+        arena[p.a + (oc * p.in_h + oy + p.pad_t) * p.in_w + ox + p.pad_l];
+}
+
+// ---- yayinli ikili islemler ---------------------------------------------
+//
+// Her eksende islenenin boyutu ya ciktiyla ayni ya da 1. Tek bir cekirdek
+// govdesi hem ayni sekilli toplama, hem sikistir-uyar blogunun [1,C,1,1]
+// kanal agirliklandirmasini, hem de skaler normalizasyonu karsiliyor.
+
+fn src_index(off: u32, c: u32, h: u32, w: u32, idx: u32) -> u32 {
+    let ox = idx % p.out_w;
+    let oy = (idx / p.out_w) % p.out_h;
+    let oc = idx / (p.out_w * p.out_h);
+    let sx = select(ox, 0u, w == 1u);
+    let sy = select(oy, 0u, h == 1u);
+    let sc = select(oc, 0u, c == 1u);
+    return off + (sc * h + sy) * w + sx;
+}
+
+fn lhs(idx: u32) -> f32 {
+    return arena[src_index(p.a, p.in_c, p.in_h, p.in_w, idx)];
+}
+
+fn rhs(idx: u32) -> f32 {
+    return arena[src_index(p.b, p.b_c, p.b_h, p.b_w, idx)];
+}
+
+@compute @workgroup_size(64)
+fn bin_add(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= out_total()) { return; }
+    arena[p.out + idx] = lhs(idx) + rhs(idx);
+}
+
+@compute @workgroup_size(64)
+fn bin_sub(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= out_total()) { return; }
+    arena[p.out + idx] = lhs(idx) - rhs(idx);
+}
+
+@compute @workgroup_size(64)
+fn bin_mul(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= out_total()) { return; }
+    arena[p.out + idx] = lhs(idx) * rhs(idx);
+}
+
+@compute @workgroup_size(64)
+fn bin_div(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= out_total()) { return; }
+    arena[p.out + idx] = lhs(idx) / rhs(idx);
+}
+
+// ---- havuzlama ----------------------------------------------------------
+
+/// Pencere ortalamasi. `ceil_mode` acikken son pencere kenari tasabiliyor;
+/// ONNX'in varsayilani (count_include_pad=0) yalnizca gecerli elemanlari
+/// sayiyor, cekirdek de oyle yapiyor.
+@compute @workgroup_size(64)
+fn avg_pool(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= out_total()) { return; }
+    let ox = idx % p.out_w;
+    let oy = (idx / p.out_w) % p.out_h;
+    let oc = idx / (p.out_w * p.out_h);
+
+    let base = p.a + oc * p.in_h * p.in_w;
+    var sum = 0.0;
+    var n = 0u;
+    for (var ky = 0u; ky < p.kh; ky = ky + 1u) {
+        let iy = oy * p.stride + ky;
+        if (iy >= p.in_h) { continue; }
+        for (var kx = 0u; kx < p.kw; kx = kx + 1u) {
+            let ix = ox * p.stride + kx;
+            if (ix >= p.in_w) { continue; }
+            sum = sum + arena[base + iy * p.in_w + ix];
+            n = n + 1u;
+        }
+    }
+    arena[p.out + idx] = sum / f32(n);
+}
+
+/// Kanal ekseninde ortalama: [1,C,H,W] -> [1,1,H,W].
+@compute @workgroup_size(64)
+fn reduce_channel(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= out_total()) { return; }
+    let plane = p.in_h * p.in_w;
+    var sum = 0.0;
+    for (var c = 0u; c < p.in_c; c = c + 1u) {
+        sum = sum + arena[p.a + c * plane + idx];
+    }
+    arena[p.out + idx] = sum / f32(p.in_c);
 }

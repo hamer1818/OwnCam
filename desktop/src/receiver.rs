@@ -28,6 +28,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::seg::effects::{output_format, Processor, Settings as EffectSettings};
+use crate::seg::gpu::Model;
 use crate::sink::Sink;
 
 /// Pencereye cizilecek en son kare. Kuyruk **yok**: arayuz geride kalirsa
@@ -156,11 +157,12 @@ fn run(
     // baglanmada yuklemek gereksiz.
     let mut processor = None;
     if config.effects {
-        match Processor::new() {
+        let model = Model::from_env();
+        match Processor::new(&model, config.frame) {
             Ok(p) => {
                 let mut shared = effects.lock().unwrap();
                 shared.error = None;
-                shared.gpu = Some(p.adapter_name().to_string());
+                shared.gpu = Some(format!("{} / {} ag", p.adapter_name(), model.label()));
                 drop(shared);
                 processor = Some(p);
             }

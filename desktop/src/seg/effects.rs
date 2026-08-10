@@ -4,7 +4,7 @@
 //! cevir, agi kostur, arka plani hazirla, birlestir, onizlemeyi kucult.
 //! Islemciye yalnizca bitmis kare ve kucuk onizleme geri okunuyor.
 
-use super::gpu::{create_init_buffer, storage_entry, Segmenter};
+use super::gpu::{create_init_buffer, storage_entry, Model, Segmenter};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Background {
@@ -68,7 +68,8 @@ struct Params {
     sharpness: f32,
     coverage_off: u32,
     yuv_word_off: u32,
-    _pad: [f32; 1],
+    /// Arenada agin on plan tahmini; 0 ise yok.
+    fgr_off: u32,
 }
 
 const PIPELINE_NAMES: [&str; 9] = [
@@ -180,8 +181,8 @@ pub struct Processed {
 }
 
 impl Processor {
-    pub fn new() -> Result<Self, String> {
-        let seg = Segmenter::new()?;
+    pub fn new(model: &Model, frame: (u32, u32)) -> Result<Self, String> {
+        let seg = Segmenter::for_frame(model, frame)?;
         let device = &seg.device;
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -466,7 +467,12 @@ impl Processor {
             sharpness: settings.sharpness,
             coverage_off: self.seg.scratch_offset(),
             yuv_word_off: s.yuv_word_off,
-            _pad: [0.0; 1],
+            // On plan ancak ag kareyi tam cozunurlukte cozuyorsa kare
+            // indeksiyle hizalanir; hizli agda maske kucuk, o yol kapali.
+            fgr_off: match self.seg.foreground_offset() {
+                Some(off) if mask.w as u32 == w && mask.h as u32 == h => off,
+                _ => 0,
+            },
         };
         self.seg
             .queue
@@ -577,7 +583,7 @@ mod tests {
     use super::*;
 
     fn islemci() -> Option<Processor> {
-        match Processor::new() {
+        match Processor::new(&Model::Hizli, (640, 480)) {
             Ok(p) => Some(p),
             Err(e) => {
                 eprintln!("ekran karti yok, test atlaniyor: {e}");
@@ -813,7 +819,12 @@ mod tests {
         let w: u32 = std::env::var("OWNCAM_EN").unwrap().parse().unwrap();
         let h: u32 = std::env::var("OWNCAM_BOY").unwrap().parse().unwrap();
         let frame = std::fs::read(&path).unwrap();
-        let mut p = islemci().expect("ekran karti gerekli");
+        // Ag ortamdan seciliyor ve **kare olcusunde** kuruluyor: RVM tam
+        // cozunurlukte calisiyor, 640x480 icin kurulmus bir plan bu kareyi
+        // dogru cozmez.
+        let model = Model::from_env();
+        let mut p = Processor::new(&model, (w, h)).expect("ekran karti gerekli");
+        eprintln!("ag: {}", model.label());
 
         if let Ok(bg) = std::env::var("OWNCAM_ARKAPLAN") {
             let bw: u32 = std::env::var("OWNCAM_ARKAPLAN_EN").unwrap().parse().unwrap();
@@ -829,7 +840,18 @@ mod tests {
         ] {
             let t0 = std::time::Instant::now();
             let out = p
-                .process(w, h, &frame, Settings { background: arka, sharpness: 0.35 })
+                .process(
+                    w,
+                    h,
+                    &frame,
+                    Settings {
+                        background: arka,
+                        sharpness: std::env::var("OWNCAM_KESKINLIK")
+                            .ok()
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0.35),
+                    },
+                )
                 .unwrap();
             eprintln!("{ad}: {:?}", t0.elapsed());
             std::fs::write(format!("/tmp/owncam_{ad}.rgba"), &out.frame).unwrap();

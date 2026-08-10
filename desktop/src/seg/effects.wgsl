@@ -33,7 +33,9 @@ struct Params {
     // `out_buf` icinde YUV420 duzleminin basladigi kelime indeksi. RGBA
     // bolgesinden sonra geliyor, bu yuzden ustune yazma riski yok.
     yuv_word_off: u32,
-    _pad2: f32,
+    // Arenada agin on plan tahmini (RVM `fgr`); 0 ise yok. Tam cozunurlukte
+    // NCHW duruyor, yani kare indeksiyle dogrudan adreslenebiliyor.
+    fgr_off: u32,
 };
 
 @group(0) @binding(0) var<storage, read_write> arena: array<f32>;
@@ -223,6 +225,19 @@ fn composite(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
+    // On plan rengi: ag veriyorsa onu kullan. Kameranin gordugu piksel yari
+    // saydam kenarda eski arka planin rengini de tasiyor; `fgr` ayiklanmis
+    // hali. Yeni arka planla harmanlanan sey bu olmali.
+    var fg = src.rgb;
+    if (p.fgr_off != 0u) {
+        let n = p.width * p.height;
+        fg = vec3<f32>(
+            arena[p.fgr_off + idx],
+            arena[p.fgr_off + n + idx],
+            arena[p.fgr_off + 2u * n + idx],
+        );
+    }
+
     var m = sample_mask(u, v);
     // Kenar sertligi: 0'da ham maske, buyudukce 0.5 esigi cevresinde
     // daha dar bir gecis. Sac gibi ince yapilarda ham maske daha iyi.
@@ -240,7 +255,7 @@ fn composite(@builtin(global_invocation_id) gid: vec3<u32>) {
         bg = sample_background(u, v);
     }
 
-    out_buf[idx] = pack(vec4<f32>(mix(bg.rgb, src.rgb, m), 1.0));
+    out_buf[idx] = pack(vec4<f32>(mix(bg.rgb, fg, m), 1.0));
 }
 
 // ---- 4) maske kapsami --------------------------------------------------

@@ -13,7 +13,7 @@
 use std::borrow::Cow;
 
 use super::onnx;
-use super::plan::{self, Kind, Plan, Shape};
+use super::plan::{self, BinOp, Kind, Plan, Shape};
 
 /// Agin girdi olcusu.
 ///
@@ -41,6 +41,50 @@ pub const INPUT: Shape = Shape {
 
 const MODEL: &[u8] = include_bytes!("../../assets/selfie_segmentation.onnx");
 
+/// Arka plani ayiran ag.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Model {
+    /// Gomulu MediaPipe Selfie Segmentation. Kare girdi, kaba ikili maske,
+    /// kareler arasinda bagimsiz - yani biraz titriyor. 1 ms, 460 KB.
+    Hizli,
+    /// Robust Video Matting. Tam cozunurlukte **alfa** uretiyor (maske degil,
+    /// gercek matting: sac telleri ve yari saydam kenarlar cikiyor) ve gizli
+    /// durumla kareler arasinda tutarli kaliyor.
+    ///
+    /// Agirliklar depoda **degil**: RVM GPL-3.0, OwnCam MIT. Dosyayi kullanici
+    /// indirip yolunu veriyor; kod agirliklari dagitmiyor.
+    Kaliteli {
+        yol: std::path::PathBuf,
+        /// Ag govdesinin kareyi kucultme orani. Kucuk deger hizli, buyuk deger
+        /// ince ayrinti. RVM'nin onerisi 720p icin ~0.375, 1080p icin 0.25.
+        oran: f32,
+    },
+}
+
+impl Model {
+    /// Ortamdan sec: `OWNCAM_MODEL` bir ONNX yolu verirse kaliteli ag,
+    /// yoksa gomulu olan.
+    pub fn from_env() -> Self {
+        match std::env::var("OWNCAM_MODEL") {
+            Ok(yol) if !yol.is_empty() => Model::Kaliteli {
+                yol: yol.into(),
+                oran: std::env::var("OWNCAM_ORAN")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0.375),
+            },
+            _ => Model::Hizli,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Model::Hizli => "hizli",
+            Model::Kaliteli { .. } => "kaliteli",
+        }
+    }
+}
+
 /// `seg.wgsl` icindeki butun `@workgroup_size` degerleriyle ayni olmali.
 const WORKGROUP: u32 = 64;
 
@@ -64,7 +108,13 @@ struct Params {
     pad_t: u32,
     pad_l: u32,
     groups: u32,
-    _pad: [u32; 3],
+    dilation: u32,
+    b_c: u32,
+    b_h: u32,
+    b_w: u32,
+    alpha: f32,
+    beta: f32,
+    _pad: [u32; 2],
 }
 
 impl From<&plan::Step> for Params {
@@ -87,7 +137,13 @@ impl From<&plan::Step> for Params {
             pad_t: s.pad_t,
             pad_l: s.pad_l,
             groups: s.group,
-            _pad: [0; 3],
+            dilation: s.dilation,
+            b_c: s.b_shape.c as u32,
+            b_h: s.b_shape.h as u32,
+            b_w: s.b_shape.w as u32,
+            alpha: s.alpha,
+            beta: s.beta,
+            _pad: [0; 2],
         }
     }
 }
@@ -98,11 +154,21 @@ fn entry_point(kind: Kind) -> &'static str {
         Kind::ConvTranspose => "conv_transpose",
         Kind::Resize => "resize",
         Kind::ReduceMean => "reduce_mean",
+        Kind::ReduceChannel => "reduce_channel",
+        Kind::AvgPool => "avg_pool",
         Kind::Relu => "relu",
         Kind::HardSwish => "hard_swish",
         Kind::Sigmoid => "sigmoid",
-        Kind::Add => "add",
-        Kind::MulChannel => "mul_channel",
+        // `tanh` ve `clip` WGSL'de yerlesik ad; giris noktalari ayri isimde.
+        Kind::Tanh => "tanh_op",
+        Kind::HardSigmoid => "hard_sigmoid",
+        Kind::Clip => "clip_op",
+        Kind::Binary(BinOp::Add) => "bin_add",
+        Kind::Binary(BinOp::Sub) => "bin_sub",
+        Kind::Binary(BinOp::Mul) => "bin_mul",
+        Kind::Binary(BinOp::Div) => "bin_div",
+        Kind::Copy => "copy_op",
+        Kind::Crop => "crop",
     }
 }
 
@@ -134,18 +200,43 @@ pub struct Segmenter {
 }
 
 impl Segmenter {
-    pub fn new() -> Result<Self, String> {
-        Self::with_size(input_shape())
-    }
-
     /// Belirli bir girdi olcusuyle kur.
     ///
     /// Referans testi bunu 256'ya sabitliyor: demirbas o olcude uretildi ve
     /// ortam degiskeni testin dogruladigi seyi degistirmemeli.
     pub fn with_size(shape: Shape) -> Result<Self, String> {
         let graph = onnx::parse(MODEL)?;
-        let plan = plan::build(&graph, shape)?;
+        Self::from_plan(plan::build(&graph, shape)?)
+    }
 
+    /// Secilen agi bu kare olcusu icin kur.
+    ///
+    /// Hizli ag kare bir girdi kullaniyor ve kareyi ona olcekliyoruz; RVM
+    /// kareyi **tam cozunurlukte** aliyor ve kucultmeyi kendi icinde yapiyor,
+    /// bu yuzden plan kare olcusune gore kuruluyor.
+    pub fn for_frame(model: &Model, frame: (u32, u32)) -> Result<Self, String> {
+        match model {
+            Model::Hizli => Self::with_size(input_shape()),
+            Model::Kaliteli { yol, oran } => {
+                let bytes = std::fs::read(yol)
+                    .map_err(|e| format!("model okunamadi ({}): {e}", yol.display()))?;
+                let mut graph = onnx::parse(&bytes)?;
+                if graph.inputs.iter().any(|n| n == "downsample_ratio") {
+                    graph.set_input_constant("downsample_ratio", *oran);
+                }
+                let shape = Shape {
+                    c: 3,
+                    h: frame.1 as usize,
+                    w: frame.0 as usize,
+                };
+                Self::from_plan(plan::build(&graph, shape)?)
+            }
+        }
+    }
+
+    /// Hazir bir plandan kur. Model dosyasi disaridan geldiginde (RVM gibi)
+    /// bu yol kullaniliyor; gomulu model de ayni yerden geciyor.
+    pub fn from_plan(plan: Plan) -> Result<Self, String> {
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -174,7 +265,7 @@ impl Segmenter {
         let eksik = |ad: &str, istenen: u64, var: u64| -> Option<String> {
             (istenen > var).then(|| format!("{ad}: {istenen} gerekiyor, ekran karti {var} veriyor"))
         };
-        for sorun in [
+        let sorun = [
             eksik(
                 "tampon boyutu",
                 limits.max_storage_buffer_binding_size as u64,
@@ -188,7 +279,8 @@ impl Segmenter {
         ]
         .into_iter()
         .flatten()
-        {
+        .next();
+        if let Some(sorun) = sorun {
             return Err(sorun);
         }
 
@@ -213,6 +305,21 @@ impl Segmenter {
                 | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+
+        // Graftaki sabitler (normalizasyonun ortalamasi gibi) arenanin
+        // kendilerine ayrilan yerine bir kez yaziliyor. Gizli durumlar
+        // sifirla basliyor - wgpu tamponlari sifirliyor ama yayin yeniden
+        // baslarsa da sifirlanmalari gerektigi icin acikca yaziyoruz.
+        for (off, values) in &plan.constants {
+            queue.write_buffer(&arena, *off as u64 * 4, bytemuck::cast_slice(values));
+        }
+        for state in &plan.states {
+            queue.write_buffer(
+                &arena,
+                state.offset as u64 * 4,
+                bytemuck::cast_slice(&vec![0.0f32; state.shape.len()]),
+            );
+        }
 
         let weights = create_init_buffer(
             &device,
@@ -350,6 +457,15 @@ impl Segmenter {
 
     pub fn mask_offset(&self) -> u32 {
         self.plan.output_off
+    }
+
+    /// Agin **on plan** tahmini (RVM'nin `fgr` ciktisi), varsa.
+    ///
+    /// Maskeleme ile matting'in farki burasi: yari saydam bir kenarda kamera
+    /// pikselinde eski arka planin rengi de var. `fgr` o rengi ayiklanmis
+    /// halini veriyor, yani sac kenarinda eski oda rengi sizmiyor.
+    pub fn foreground_offset(&self) -> Option<u32> {
+        self.plan.output("fgr").map(|(off, _)| off)
     }
 
     /// Arenanin sonundaki calisma alani; kompozit maske kapsamini buraya yaziyor.
@@ -497,7 +613,7 @@ mod tests {
     /// bu modeli 32 ms'de cozüyordu; olcum buradaki kazanci gosteriyor.
     #[test]
     fn cikarim_sure_butcesinde() {
-        let seg = match Segmenter::new() {
+        let seg = match Segmenter::with_size(input_shape()) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("ekran karti yok, olcum atlaniyor: {e}");
@@ -569,7 +685,7 @@ mod tests {
     #[test]
     #[ignore = "olcum; gercek kare dosyasi gerektirir"]
     fn girdi_hazirlama() {
-        let Ok(seg) = Segmenter::new() else {
+        let Ok(seg) = Segmenter::with_size(input_shape()) else {
             eprintln!("ekran karti yok");
             return;
         };
@@ -654,7 +770,7 @@ mod tests {
     #[test]
     #[ignore = "olcum; elle calistirilir"]
     fn maske_titremesi() {
-        let Ok(seg) = Segmenter::new() else {
+        let Ok(seg) = Segmenter::with_size(input_shape()) else {
             eprintln!("ekran karti yok");
             return;
         };
@@ -694,6 +810,221 @@ mod tests {
                 sum_flip / frames as f64,
             );
         }
+    }
+
+    /// **Gelistirme kancasi**: harici bir modeli GPU'da kosup maskeyi yaz.
+    ///
+    /// `plan.rs`'teki kardesi plani kuruyor, bu onu calistiriyor. Cikti ayni
+    /// girdiyle bagimsiz bir ONNX calisma zamanindan (tract) alinan maskeyle
+    /// karsilastirilmak icin ham f32 olarak yaziliyor.
+    ///
+    /// ```text
+    /// OWNCAM_MODEL=/yol/rvm.onnx OWNCAM_HAM=/tmp/ham_rgb.bin \
+    ///   OWNCAM_GIRDI=1280x720 OWNCAM_CIKTI=/tmp/gpu_alpha.f32 \
+    ///   cargo test --release yabanci_model_kosusu -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "elle calistirilir; harici model dosyasi gerektirir"]
+    fn yabanci_model_kosusu() {
+        let (Ok(model), Ok(ham)) = (
+            std::env::var("OWNCAM_MODEL"),
+            std::env::var("OWNCAM_HAM"),
+        ) else {
+            eprintln!("OWNCAM_MODEL ve OWNCAM_HAM gerekli");
+            return;
+        };
+        let (w, h) = std::env::var("OWNCAM_GIRDI")
+            .ok()
+            .and_then(|v| {
+                let (a, b) = v.split_once('x')?;
+                Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?))
+            })
+            .expect("OWNCAM_GIRDI=ExB");
+
+        let bytes = std::fs::read(&model).expect("model okunamadi");
+        let mut g = onnx::parse(&bytes).expect("ONNX ayristirilamadi");
+        if g.inputs.iter().any(|n| n == "downsample_ratio") {
+            let r = std::env::var("OWNCAM_ORAN")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.25f32);
+            g.set_input_constant("downsample_ratio", r);
+        }
+        let plan = plan::build(&g, Shape { c: 3, h, w }).expect("plan");
+        let seg = Segmenter::from_plan(plan).expect("gpu");
+
+        // Ham dosya HWC u8 RGB; ag NCHW f32 0..1 bekliyor.
+        let raw = std::fs::read(&ham).expect("ham kare okunamadi");
+        assert_eq!(raw.len(), w * h * 3, "ham kare boyutu tutmuyor");
+        let mut input = vec![0f32; 3 * h * w];
+        for y in 0..h {
+            for x in 0..w {
+                for c in 0..3 {
+                    input[(c * h + y) * w + x] = raw[(y * w + x) * 3 + c] as f32 / 255.0;
+                }
+            }
+        }
+
+        let mask = seg.mask(&input).expect("maske");
+        eprintln!(
+            "{} | {} adim, arena {:.1} MB | maske {:?}",
+            seg.adapter_name,
+            seg.steps(),
+            seg.arena_bytes() as f64 / 1e6,
+            seg.mask_shape()
+        );
+        let n = 30;
+        let t0 = std::time::Instant::now();
+        let mut previous = mask.clone();
+        let mut deltas = Vec::new();
+        for _ in 0..n {
+            let m = seg.mask(&input).unwrap();
+            let d: f64 = m
+                .iter()
+                .zip(&previous)
+                .map(|(a, b)| (a - b).abs() as f64)
+                .sum::<f64>()
+                / m.len() as f64;
+            deltas.push(d);
+            previous = m;
+        }
+        eprintln!("kare basina {:?}", t0.elapsed() / n);
+        // Gizli durum calisiyorsa ayni kare tekrar verilse bile ilk birkac
+        // kare degisir (durum doluyor) ve sonra sabitlenir. Hic degismiyorsa
+        // geri besleme kopmus demektir.
+        eprintln!(
+            "kareler arasi maske farki: 1.{:.6}  2.{:.6}  3.{:.6}  son {:.6}",
+            deltas[0],
+            deltas[1],
+            deltas[2],
+            deltas[n as usize - 1]
+        );
+
+        if let Ok(out) = std::env::var("OWNCAM_CIKTI") {
+            std::fs::write(&out, bytemuck::cast_slice(&mask)).unwrap();
+            eprintln!("maske yazildi: {out}");
+        }
+    }
+
+    /// **Olcum**: iki ag ardisik karelerde ne kadar titriyor?
+    ///
+    /// RVM'nin gerekcesi yalnizca kenar keskinligi degil, **zamansal
+    /// tutarlilik**: gizli durum tasidigi icin ayni sahnede maske kareden
+    /// kareye zipladmamali. Hizli ag her kareyi bagimsiz cozuyor.
+    ///
+    /// Gercek video yerine ayni kareye kare basina bagimsiz gurultu
+    /// ekleniyor - titremenin fiziksel sebebi zaten bu. Iki ag farkli
+    /// cozunurlukte maske uretiyor, bu yuzden karsilastirma **kare
+    /// cozunurlugune buyutulmus** maske uzerinde yapiliyor; aksi halde kucuk
+    /// maskenin titremesi oldugundan buyuk gorunurdu.
+    ///
+    /// ```text
+    /// OWNCAM_HAM=/tmp/ham_rgb.bin OWNCAM_GIRDI=1280x720 \
+    ///   OWNCAM_MODEL=/tmp/rvm.onnx \
+    ///   cargo test --release titreme_karsilastirmasi -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "olcum; harici model ve kare dosyasi gerektirir"]
+    fn titreme_karsilastirmasi() {
+        let Ok(ham) = std::env::var("OWNCAM_HAM") else {
+            eprintln!("OWNCAM_HAM gerekli");
+            return;
+        };
+        let (w, h) = std::env::var("OWNCAM_GIRDI")
+            .ok()
+            .and_then(|v| {
+                let (a, b) = v.split_once('x')?;
+                Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?))
+            })
+            .expect("OWNCAM_GIRDI=ExB");
+        let raw = std::fs::read(&ham).expect("ham kare");
+        assert_eq!(raw.len(), w * h * 3);
+
+        let mut modeller = vec![Model::Hizli];
+        if let Ok(yol) = std::env::var("OWNCAM_MODEL") {
+            modeller.push(Model::Kaliteli {
+                yol: yol.into(),
+                oran: 0.375,
+            });
+        }
+
+        for model in &modeller {
+            let seg = match Segmenter::for_frame(model, (w as u32, h as u32)) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("{}: kurulamadi: {e}", model.label());
+                    continue;
+                }
+            };
+            let net = seg.input_size();
+            let mask_shape = seg.mask_shape();
+            let sigma = 2.0 / 255.0;
+            let mut state = 0x2545_F491u32;
+            let (mut sum, mut frames) = (0.0f64, 0u32);
+            let mut previous: Option<Vec<f32>> = None;
+            // Ilk kareler RVM'nin gizli durumu dolarken geciyor; olcumun
+            // disinda tutuluyorlar. Hizli agin durumu olmadigi icin bu onu
+            // etkilemiyor - yani karsilastirma haksizlik yapmiyor.
+            const ISINMA: u32 = 5;
+
+            for i in 0..25u32 {
+                // Kareyi agin girdi olcusune ornekle ve gurultu ekle.
+                let mut input = vec![0f32; net.len()];
+                for y in 0..net.h {
+                    for x in 0..net.w {
+                        let sx = (x * w / net.w).min(w - 1);
+                        let sy = (y * h / net.h).min(h - 1);
+                        for c in 0..3 {
+                            let v = raw[(sy * w + sx) * 3 + c] as f32 / 255.0;
+                            let n = (xorshift(&mut state) - 0.5) * 2.0 * sigma;
+                            input[(c * net.h + y) * net.w + x] = (v + n).clamp(0.0, 1.0);
+                        }
+                    }
+                }
+                let mask = buyut(&seg.mask(&input).unwrap(), mask_shape.w, mask_shape.h, w, h);
+                if let (Some(prev), true) = (&previous, i > ISINMA) {
+                    sum += mask
+                        .iter()
+                        .zip(prev)
+                        .map(|(a, b)| (a - b).abs() as f64)
+                        .sum::<f64>()
+                        / mask.len() as f64;
+                    frames += 1;
+                }
+                previous = Some(mask);
+            }
+            eprintln!(
+                "{:9} maske {}x{} -> kare cozunurlugunde ardisik fark {:.5}",
+                model.label(),
+                mask_shape.w,
+                mask_shape.h,
+                sum / frames as f64
+            );
+        }
+    }
+
+    /// Iki dogrusal buyutme - iki agin maskesini ayni olcude karsilastirmak
+    /// icin. Kompozit shader'i da ayni seyi yapiyor.
+    fn buyut(src: &[f32], sw: usize, sh: usize, dw: usize, dh: usize) -> Vec<f32> {
+        if (sw, sh) == (dw, dh) {
+            return src.to_vec();
+        }
+        let mut out = vec![0f32; dw * dh];
+        for y in 0..dh {
+            let fy = ((y as f32 + 0.5) * sh as f32 / dh as f32 - 0.5).clamp(0.0, sh as f32 - 1.0);
+            let (y0, ty) = (fy.floor() as usize, fy - fy.floor());
+            let y1 = (y0 + 1).min(sh - 1);
+            for x in 0..dw {
+                let fx =
+                    ((x as f32 + 0.5) * sw as f32 / dw as f32 - 0.5).clamp(0.0, sw as f32 - 1.0);
+                let (x0, tx) = (fx.floor() as usize, fx - fx.floor());
+                let x1 = (x0 + 1).min(sw - 1);
+                let a = src[y0 * sw + x0] * (1.0 - tx) + src[y0 * sw + x1] * tx;
+                let b = src[y1 * sw + x0] * (1.0 - tx) + src[y1 * sw + x1] * tx;
+                out[y * dw + x] = a * (1.0 - ty) + b * ty;
+            }
+        }
+        out
     }
 
     #[test]
