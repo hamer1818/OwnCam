@@ -1,16 +1,15 @@
 //! egui arayuzu: solda canli goruntu, sagda telefon ayarlari.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver as MpscReceiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::discovery::Discovery;
 use crate::phone::{Phone, Status};
 use crate::photo;
-use crate::receiver::{EffectShared, FrameSlot, Receiver, ReceiverConfig};
+use crate::receiver::{EffectShared, FrameSlot};
 use crate::seg::effects::{Background, Settings as EffectSettings};
 use crate::sink;
+use crate::supervisor::Supervisor;
 
 pub const RESOLUTIONS: [(u32, u32); 3] = [(640, 480), (1280, 720), (1920, 1080)];
 pub const FPS_OPTIONS: [u32; 4] = [15, 24, 30, 60];
@@ -35,8 +34,9 @@ pub const EFFECT_MODES: [&str; 4] = [
     "Fotograf",
 ];
 
-const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const PREVIEW_PIXELS: u32 = 640 * 360;
+/// Onizlemeye 30 fps gerekmiyor; sanal kamera her kareyi almaya devam ediyor.
+const PREVIEW_FPS: u32 = 15;
 
 /// Arka plan efektinin arayuzdeki hali. Yalnizca acik/kapali gecisi boru
 /// hattini degistiriyor; kalan ayarlar akisi kesmeden canli uygulaniyor.
@@ -116,7 +116,6 @@ pub struct OwnCamApp {
     /// geri gondermemek icin bayrak.
     applying: bool,
 
-    receiver: Option<Receiver>,
     frame: Arc<FrameSlot>,
     texture: Option<egui::TextureHandle>,
     texture_size: (u32, u32),
@@ -125,18 +124,17 @@ pub struct OwnCamApp {
     status_line: String,
     host_input: String,
 
-    poll_tx: Sender<Result<Status, String>>,
-    poll_rx: MpscReceiver<Result<Status, String>>,
-    poll_pending: Arc<AtomicBool>,
-    last_poll: Instant,
+    /// Yoklama ve alici yasam dongusu **kendi is parcaciginda**; arayuzun
+    /// gorunur olmasina bagli degil. Bkz. `supervisor`.
+    supervisor: Supervisor,
+    /// En son ozumsenen durum surumu; ayni durumu tekrar ozumseyip
+    /// kullanicinin duzenlemesini geri almayalim.
+    last_generation: u64,
 
     sink_name: Option<String>,
     /// Arka plan efekti: arayuzdeki hali ve isleyiciyle paylasilan durum.
     effect: EffectUi,
     effects: Arc<Mutex<EffectShared>>,
-    /// Efekt acilip kapandiginda boru hattinin sekli degisiyor; bir sonraki
-    /// karede aliciyi yeniden kur (2 sn'lik yoklamayi bekleme).
-    resync: bool,
     photo_state: Arc<Mutex<String>>,
     discovery: Discovery,
     /// Kesif bir telefon buldugunda kendiliginden baglan - ama yalnizca
@@ -210,7 +208,6 @@ fn bit(value: bool) -> String {
 
 impl OwnCamApp {
     pub fn new(cc: &eframe::CreationContext<'_>, host: Option<String>) -> Self {
-        let (poll_tx, poll_rx) = channel();
         let detected = sink::detect();
         let sink_name = detected.as_ref().map(|s| s.name());
         drop(detected);
@@ -221,29 +218,42 @@ impl OwnCamApp {
         let discovery = Discovery::start(move || ctx.request_repaint());
         let host_given = host.is_some();
 
+        // Gozetmen once kurulur: kare yuvasi ve efekt durumu onunla paylasiliyor.
+        let frame = Arc::new(FrameSlot::default());
+        let receiver_state = Arc::new(Mutex::new(String::new()));
+        let effects = Arc::new(Mutex::new(EffectShared::default()));
+        let effect = EffectUi::from_env();
+        let ctx = cc.egui_ctx.clone();
+        let supervisor = Supervisor::start(
+            host.clone(),
+            PREVIEW_PIXELS,
+            PREVIEW_FPS,
+            frame.clone(),
+            receiver_state.clone(),
+            effects.clone(),
+            move || ctx.request_repaint(),
+        );
+        supervisor.set_effects(effect.enabled());
+
         let mut app = Self {
             phone: host.clone().map(Phone::new),
             status: None,
             settings: Settings::default(),
             applying: false,
-            receiver: None,
-            frame: Arc::new(FrameSlot::default()),
+            frame,
             texture: None,
             texture_size: (0, 0),
-            receiver_state: Arc::new(Mutex::new(String::new())),
+            receiver_state,
             status_line: match &host {
                 Some(h) => format!("telefon: {h}"),
                 None => "araniyor (mDNS)...".into(),
             },
             host_input: host.unwrap_or_default(),
-            poll_tx,
-            poll_rx,
-            poll_pending: Arc::new(AtomicBool::new(false)),
-            last_poll: Instant::now() - POLL_INTERVAL,
+            supervisor,
+            last_generation: 0,
             sink_name,
-            effect: EffectUi::from_env(),
-            effects: Arc::new(Mutex::new(EffectShared::default())),
-            resync: false,
+            effect,
+            effects,
             photo_state: Arc::new(Mutex::new(String::new())),
             discovery,
             // Elle adres verildiyse kesif secimi ezmesin.
@@ -258,22 +268,6 @@ impl OwnCamApp {
             egui::TextureOptions::LINEAR,
         ));
         app
-    }
-
-    fn poll_status(&mut self) {
-        let Some(phone) = self.phone.clone() else {
-            return;
-        };
-        if self.poll_pending.swap(true, Ordering::SeqCst) {
-            return; // onceki sorgu hala yolda
-        }
-        let tx = self.poll_tx.clone();
-        let pending = self.poll_pending.clone();
-        std::thread::spawn(move || {
-            let result = phone.status();
-            let _ = tx.send(result);
-            pending.store(false, Ordering::SeqCst);
-        });
     }
 
     fn apply_settings(&self) {
@@ -319,54 +313,6 @@ impl OwnCamApp {
         self.applying = false;
     }
 
-    /// Kare boyutu degistiyse aliciyi yeni boyutla yeniden kur.
-    ///
-    /// Otomatik donus acikken kare sekli telefonun fiziksel yonuyle degisiyor
-    /// (1280x720 <-> 720x1280). `-vf scale` boyutu sabit tuttugu icin eski
-    /// boyutla okumaya devam etmek goruntuyu bozar.
-    fn sync_receiver(&mut self, ctx: &egui::Context, status: &Status) {
-        let Some(phone) = self.phone.clone() else {
-            return;
-        };
-        if !status.streaming {
-            if self.receiver.is_some() {
-                eprintln!("[alici] telefon yayini durdurdu, alici kapatiliyor");
-            }
-            self.receiver = None;
-            return;
-        }
-        let Some(frame) = status.frame_size() else {
-            eprintln!("[alici] telefon kare boyutu bildirmedi: {:?}", status.frame);
-            return;
-        };
-        let wanted = ReceiverConfig {
-            host: phone.host.clone(),
-            fps: if status.fps == 0 { 30 } else { status.fps },
-            frame,
-            preview_pixels: PREVIEW_PIXELS,
-            preview_fps: 15,
-            effects: self.effect.enabled(),
-        };
-        if self.receiver.as_ref().map(|r| &r.config) == Some(&wanted) {
-            return;
-        }
-        eprintln!(
-            "[alici] kuruluyor: {} {}x{} @{} fps, efekt {}",
-            wanted.host, frame.0, frame.1, wanted.fps, wanted.effects
-        );
-        // Onceki aliciyi once dusur: iki ffmpeg ayni sanal kameraya yazamaz.
-        self.receiver = None;
-        let ctx = ctx.clone();
-        self.receiver = Some(Receiver::start(
-            wanted,
-            sink::detect(),
-            self.frame.clone(),
-            self.receiver_state.clone(),
-            self.effects.clone(),
-            move || ctx.request_repaint(),
-        ));
-    }
-
     fn upload_frame(&mut self, ctx: &egui::Context) {
         let Some(frame) = self.frame.take() else {
             return;
@@ -396,45 +342,34 @@ impl eframe::App for OwnCamApp {
                 self.phone = Some(Phone::new(host.clone()));
                 self.host_input = host;
                 self.auto_connected = true;
-                self.last_poll = Instant::now() - POLL_INTERVAL;
+                self.supervisor.set_host(self.phone.as_ref().map(|p| p.host.clone()));
             }
         }
 
-        while let Ok(result) = self.poll_rx.try_recv() {
-            match result {
-                Ok(status) => {
-                    self.absorb(&status);
-                    self.sync_receiver(ctx, &status);
-                    self.status_line = match self.phone.as_ref() {
-                        Some(p) => format!("telefon: {}", p.host),
-                        None => String::new(),
-                    };
-                    self.status = Some(status);
-                }
-                Err(e) => {
-                // Telefona ulasilamiyorsa sebebi ucuza gorunur olsun; arayuz
-                // kapaliyken tek ipucu bu satir oluyor.
-                eprintln!("[durum] {e}");
+        // Gozetmen kendi is parcaciginda yokluyor; burada yalnizca yeni bir
+        // durum gelmisse arayuze yansitiyoruz.
+        let (status, generation) = self.supervisor.status();
+        if generation != self.last_generation {
+            self.last_generation = generation;
+            if let Some(status) = status {
+                self.absorb(&status);
+                self.status_line = match self.phone.as_ref() {
+                    Some(p) => format!("telefon: {}", p.host),
+                    None => String::new(),
+                };
+                self.status = Some(status);
+            }
+            if let Some(e) = self.supervisor.error() {
                 self.status_line = e;
             }
-            }
         }
-        if self.last_poll.elapsed() >= POLL_INTERVAL {
-            self.last_poll = Instant::now();
-            self.poll_status();
-        }
+
         self.upload_frame(ctx);
 
         egui::SidePanel::right("ayarlar")
             .default_width(300.0)
             .show(ctx, |ui| self.settings_panel(ui));
 
-        if self.resync {
-            self.resync = false;
-            if let Some(status) = self.status.clone() {
-                self.sync_receiver(ctx, &status);
-            }
-        }
         egui::CentralPanel::default().show(ctx, |ui| self.video_panel(ui));
 
         // Kare gelmese de durum satiri ve sayaclar tazelensin.
@@ -531,7 +466,7 @@ impl OwnCamApp {
         // Ayarlari isleyiciye ilet; acik/kapali degistiyse alici yeniden kurulmali.
         self.effects.lock().unwrap().settings = self.effect.settings();
         if self.effect.enabled() != onceki_acik {
-            self.resync = true;
+            self.supervisor.set_effects(self.effect.enabled());
         }
     }
 
@@ -576,7 +511,7 @@ impl OwnCamApp {
                     self.phone = Some(Phone::new(entry.host.clone()));
                     self.host_input = entry.host.clone();
                     self.auto_connected = true;
-                    self.last_poll = Instant::now() - POLL_INTERVAL;
+                    self.supervisor.set_host(self.phone.as_ref().map(|p| p.host.clone()));
                 }
             }
             ui.add_space(4.0);
@@ -591,7 +526,7 @@ impl OwnCamApp {
                 if ui.button("Baglan").clicked() && !self.host_input.trim().is_empty() {
                     self.phone = Some(Phone::new(self.host_input.trim()));
                     self.auto_connected = true;
-                    self.last_poll = Instant::now() - POLL_INTERVAL;
+                    self.supervisor.set_host(self.phone.as_ref().map(|p| p.host.clone()));
                 }
             });
             return;
@@ -663,7 +598,6 @@ impl OwnCamApp {
                     let _ = if streaming { phone.stop() } else { phone.start() };
                 });
                 // Bir sonraki yoklama gecikmesini beklemeden durumu tazele.
-                self.last_poll = Instant::now() - POLL_INTERVAL;
             }
         }
 

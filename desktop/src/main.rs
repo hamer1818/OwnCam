@@ -15,6 +15,7 @@ mod photo;
 mod receiver;
 mod seg;
 mod sink;
+mod supervisor;
 
 use app::OwnCamApp;
 
