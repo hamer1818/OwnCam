@@ -7,7 +7,9 @@ use crate::discovery::Discovery;
 use crate::phone::{Phone, Status};
 use crate::photo;
 use crate::receiver::{EffectShared, FrameSlot};
-use crate::seg::effects::{Background, Settings as EffectSettings};
+use crate::seg::effects::{
+    Background, Settings as EffectSettings, KALITELI_KESKINLIK, VARSAYILAN_KESKINLIK,
+};
 use crate::seg::gpu::Model;
 use crate::sink;
 use crate::supervisor::Supervisor;
@@ -59,7 +61,7 @@ impl Default for EffectUi {
             mode: 0,
             blur: 0.6,
             color: [0.05, 0.35, 0.6],
-            sharpness: 0.35,
+            sharpness: VARSAYILAN_KESKINLIK,
             photo: String::new(),
             model_path: String::new(),
         }
@@ -469,8 +471,26 @@ impl OwnCamApp {
 
         if self.effect.enabled() {
             ui.add(
-                egui::Slider::new(&mut self.effect.sharpness, 0.0..=1.0).text("kenar sertligi"),
+                egui::Slider::new(&mut self.effect.sharpness, 0.0..=1.0)
+                    .text("kenar sertligi")
+                    .custom_formatter(|v, _| format!("{v:.2}")),
             );
+            // Iki agin ciktisi ayni sey degil, bu yuzden dogru deger de ayni
+            // degil: hizli ag olasilik uretiyor (sertlestir), RVM alfa
+            // uretiyor (sertlestirme).
+            if self.effect.model() == Model::Hizli {
+                if self.effect.sharpness < 0.4 {
+                    ui.small(format!(
+                        "dusuk deger hizli agda arka plani sacin icine sizdiriyor; \
+                         {VARSAYILAN_KESKINLIK:.2} civari onerilir"
+                    ));
+                }
+            } else if self.effect.sharpness > 0.3 {
+                ui.small(format!(
+                    "kaliteli ag gercek alfa uretiyor; sertlestirmek sac tellerini \
+                     yok ediyor, {KALITELI_KESKINLIK:.2} civari onerilir"
+                ));
+            }
             self.model_ui(ui);
             let (err, gpu, coverage) = {
                 let shared = self.effects.lock().unwrap();

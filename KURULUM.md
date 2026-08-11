@@ -155,8 +155,18 @@ bir insana ya da odaya, tavana degil.
 | Duz renk | arkasi secilen renkle dolar |
 | Fotograf | arkasina secilen foto konur (kadraji kaplayacak sekilde) |
 
-**Kenar sertligi** kaydiraci gecisin genisligini ayarliyor. Dusuk deger sac
-gibi ince yapilarda daha dogru, yuksek deger daha keskin bir kesim verir.
+**Kenar sertligi** kaydiraci maskenin gecis bandini daraltiyor ve **hangi agi
+kullandigina gore** dogru degeri degisiyor:
+
+- **Hizli ag (varsayilan): yuksek tut, 0,7 civari.** Bu agin ciktisi bir
+  saydamlik degil, "bu piksel kisi mi" olasiligi. Dusuk degerde agin emin
+  olamadigi her piksel yari saydam kaliyor ve arka plan rengi sacin **icine**
+  siziyor. Olculdu: 0,35'te kisinin alaninin **%17,3'u** yari saydam, 0,70'te
+  %7, 0,90'da %3,3 — ama 0,90'da kenar basamaklanmaya basliyor.
+- **Kaliteli ag: dusuk tut, 0,15 civari.** RVM gercek alfa uretiyor;
+  sertlestirmek gercek sac tellerini yok eder.
+
+Arayuz zaten secili aga gore uyari veriyor, ama bilerek degistirebilirsin.
 
 Efekt ekran kartinda kosuyor: 1280x720'de kare basina 1,9 ms.
 

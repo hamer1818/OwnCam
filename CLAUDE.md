@@ -191,6 +191,20 @@ distinguishable background. On an extreme close-up (face filling the frame,
 flat white wall behind) it returns a near-empty mask. That is the model's
 limit, not a bug; do not go looking for one.
 
+**The two networks' outputs are not the same kind of thing, and the composite
+must not treat them alike.** MediaPipe emits `P(person)` — a probability;
+RVM emits an alpha. Blending a probability as if it were transparency makes
+every pixel the net is unsure about semi-transparent, so the background colour
+bleeds *into* the subject (reported as "the black is spilling onto my head").
+Measured on a real 1280x720 frame, translucent band as a share of the
+subject's area: sharpness 0.35 → **17.3%**, 0.70 → 7%, 0.90 → 3.3% (but 0.90
+staircases the edge). Hence `VARSAYILAN_KESKINLIK = 0.70` for the fast model
+and `KALITELI_KESKINLIK = 0.15` for RVM, where hardening destroys real hair.
+
+Raising `OWNCAM_SEG_BOYUT` also narrows the band (17.3% → 6.7% at 384 on that
+frame) but it is scene-dependent and already measured as a trade — sharpness
+is the safe lever, so the default input size stayed 256.
+
 The composite writes **YUV420 directly**, not RGBA: readback drops from 4 to 1.5 bytes per
 pixel and the second ffmpeg passes bytes through instead of converting. Measured A/B on the
 same source: 15.5% → 9.7% total CPU. Each thread writes a whole `u32` so byte-level

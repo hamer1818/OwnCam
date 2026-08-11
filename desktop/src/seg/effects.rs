@@ -31,16 +31,35 @@ impl Background {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Settings {
-    pub background: Background,
-    /// Maske kenarinin sertligi. 0 ham maske (sac icin iyi), 1 keskin kesim.
+    /// Maskenin 0,5 esigi cevresindeki gecisi ne kadar dar olacak. 0 ham
+    /// maske, 1 neredeyse ikili kesim.
+    ///
+    /// Varsayilanin yuksek olmasinin sebebi: hizli agin ciktisi bir **alfa
+    /// degil, olasilik**. MediaPipe "bu piksel kisi mi" diye cevap veriyor;
+    /// bunu saydamlik gibi harmanlamak, agin emin olamadigi her pikseli yari
+    /// saydam yapiyor ve arka plan rengi sacin **icine** siziyor. Olculdu
+    /// (1280x720 gercek kare, kisinin alaninin yuzdesi olarak yari saydam
+    /// bant): 0,35'te %17,3 - yani "sen"in altida biri kismen arka plan.
+    /// 0,70'te %7, 0,90'da %3,3 ama orada kenar basamaklanmaya basliyor.
+    ///
+    /// RVM'de tersi gecerli: onun ciktisi **gercek alfa**, sertlestirmek
+    /// gercek sac tellerini yok eder. Kaliteli ag secilince arayuz dusuk bir
+    /// deger onermeye basliyor.
     pub sharpness: f32,
+    pub background: Background,
 }
+
+/// Hizli ag icin olculen en iyi denge (bkz. [`Settings::sharpness`]).
+pub const VARSAYILAN_KESKINLIK: f32 = 0.70;
+
+/// RVM'nin alfasi zaten dogru; yalnizca hafif bir kenar yumusatmasi.
+pub const KALITELI_KESKINLIK: f32 = 0.15;
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             background: Background::Off,
-            sharpness: 0.35,
+            sharpness: VARSAYILAN_KESKINLIK,
         }
     }
 }
@@ -809,6 +828,21 @@ mod tests {
     /// OWNCAM_KARE=/yol/kare.rgba OWNCAM_EN=1280 OWNCAM_BOY=720 \
     ///   cargo test --release efekt_ornekleri -- --ignored --nocapture
     /// ```
+    /// `OWNCAM_RENK=0.0,0.0,0.0` gibi; duz renk ornegini baska bir renkle
+    /// uretmek icin. Arka planin karanlik olmasi kenardaki sizmayi cok daha
+    /// gorunur yapiyor, o yuzden ayarlanabilir.
+    fn renk_ortamdan(varsayilan: [f32; 3]) -> [f32; 3] {
+        let Ok(v) = std::env::var("OWNCAM_RENK") else {
+            return varsayilan;
+        };
+        let p: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        if p.len() == 3 {
+            [p[0], p[1], p[2]]
+        } else {
+            varsayilan
+        }
+    }
+
     #[test]
     #[ignore = "elle calistirilir; gercek kare dosyasi gerektirir"]
     fn efekt_ornekleri() {
@@ -835,7 +869,7 @@ mod tests {
         for (ad, arka) in [
             ("kapali", Background::Off),
             ("bulanik", Background::Blur(0.6)),
-            ("renk", Background::Color([0.05, 0.35, 0.6])),
+            ("renk", Background::Color(renk_ortamdan([0.05, 0.35, 0.6]))),
             ("foto", Background::Image),
         ] {
             let t0 = std::time::Instant::now();

@@ -84,6 +84,13 @@ Iki ag secilebiliyor ve ikisi de **ayni** calisma zamanindan geciyor:
 
 Olculen fark:
 
+- **Maske mi, alfa mi.** Hizli agin ciktisi bir olasilik (`P(kisi)`), RVM'nin
+  ciktisi gercek alfa. Olasiligi saydamlik gibi harmanlamak bir kategori
+  hatasi: agin emin olamadigi her piksel yari saydam kaliyor ve arka plan
+  rengi kisinin icine siziyor. Olculdu (1280x720 gercek kare, yari saydam
+  bandin kisinin alanina orani): kenar sertligi 0,35'te **%17,3**, 0,70'te
+  %7, 0,90'da %3,3. Bu yuzden varsayilan sertlik 0,70 — RVM'de ise 0,15
+  onerilir, cunku orada sertlestirmek gercek sac tellerini yok eder.
 - **Kenar.** Hizli ag saci kesiyor ve kenarda yeni arka planin rengiyle bir
   hale birakiyor; RVM sac tellerini ve kulaklik kablosunu koruyor. RVM'nin
   `fgr` ciktisi kompozitte kullaniliyor - maskeleme ile matting'in farki bu:
