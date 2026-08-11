@@ -30,7 +30,7 @@ sorun cikmaz.
 `owncam-<surum>.apk` dosyasini indir ve kur:
 
 ```bash
-adb install owncam-0.1.1.apk
+adb install owncam-0.1.2.apk
 ```
 
 Kablo yoksa APK'yi telefona kopyalayip dosya yoneticisinden acabilirsin;
@@ -94,8 +94,8 @@ v4l2-ctl --list-devices | grep -A2 OwnCam
 Surumden inen arsivi ac ve kurulum betigini calistir:
 
 ```bash
-tar xzf owncam-0.1.1-linux-x86_64.tar.gz
-cd owncam-0.1.1-linux-x86_64
+tar xzf owncam-0.1.2-linux-x86_64.tar.gz
+cd owncam-0.1.2-linux-x86_64
 ./kur-masaustu.sh
 ```
 

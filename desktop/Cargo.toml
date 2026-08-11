@@ -1,6 +1,6 @@
 [package]
 name = "owncam"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Telefonu webcam'e ceviren OwnCam masaustu uygulamasi"
 license = "MIT"
